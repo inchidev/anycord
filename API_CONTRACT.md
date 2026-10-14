@@ -9,7 +9,14 @@ Decision: 2026-10-14. Serve the generated Nuxt client and the application API fr
 | Endpoint name | Method and path | Behavior |
 | --- | --- | --- |
 | runtime | GET `/api/runtime` | Contract version, actual engine, auth owner and realtime transport; no credentials |
-| authStatus | GET `/api/auth/status` | Initialization status and current application user or null |
+| authStatus | GET `/api/auth/status` | Initialization status, current user or null, and optional enabled authentication methods |
+| authentication / authenticationUpdate | GET / PUT `/api/installation/authentication` | Installation-owner-only password/Telegram login and registration policy |
+| telegramIntegration / telegramIntegrationUpdate | GET / PUT `/api/integrations/telegram` | Installation-owner-only bot/OIDC configuration; saved secrets are encrypted and omitted from responses |
+| telegramWebhookSetup | POST `/api/integrations/telegram/webhook` | Owner installs the verified notification webhook for the configured bot |
+| telegramAccount / telegramPreferences / telegramUnlink | GET / PUT / DELETE `/api/account/telegram` | Current account's link status, opt-in delivery preferences and guarded unlink |
+| telegramTest | POST `/api/account/telegram/test` | Opted-in account sends a test to its verified Telegram identity |
+| accountPassword | POST `/api/account/password` | Add username/password to the same Telegram-created account using a recent session |
+| threadFollow / threadFollowUpdate | GET / PUT `/api/channels/:channelId/threads/:threadId/follow` | Authenticated member reads/changes their own thread subscription |
 | authRegister / authLogin | POST `/api/auth/register`, `/api/auth/login` | Username/password; returns application profile and sets Better Auth cookie |
 | authLogout | POST `/api/auth/logout` | Revokes session, clears cookie, closes that session's live connections; `{ success: true }` |
 | bootstrap | GET `/api/bootstrap?workspace=…` | Accessible servers, selected server's channels and members |

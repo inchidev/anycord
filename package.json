@@ -20,10 +20,12 @@
     "test:connections": "node scripts/test-connections.mjs",
     "test:servers": "node scripts/test-server-list.mjs",
     "test:viewport": "node scripts/test-mobile-viewport.mjs",
-    "verify": "npm run typecheck && npm run test:contract && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && npm run build && npm run test:pwa",
+    "verify": "npm run typecheck && npm run test:contract && npm run test:telegram && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && npm run build && npm run test:pwa",
     "prepare:cloudflare": "npm run build && node scripts/prepare-cloudflare-config.mjs",
     "release:package": "node scripts/package-release.mjs",
-    "test:pwa": "node scripts/test-pwa.mjs"
+    "test:pwa": "node scripts/test-pwa.mjs",
+    "pretest:telegram": "node scripts/write-build-info.mjs",
+    "test:telegram": "node scripts/test-telegram.mjs"
   },
   "dependencies": {
     "@cloudflare/realtimekit": "2.0.3",
@@ -38,6 +40,7 @@
     "aws4fetch": "1.0.20",
     "better-auth": "1.7.7",
     "drizzle-orm": "0.45.4",
+    "jose": "6.2.12",
     "nuxt": "4.6.1",
     "zod": "4.6.7"
   },
@@ -46,6 +49,7 @@
     "@iconify-json/lucide": "^1.2.100",
     "drizzle-kit": "0.31.11",
     "esbuild": "0.27.7",
+    "miniflare": "5.20261012.0-beta",
     "typescript": "^5.9.3",
     "vue-tsc": "3.3.13",
     "wrangler": "4.151.0",

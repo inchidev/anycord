@@ -3,6 +3,12 @@
 
 .app-status { position: fixed; z-index: 100; inset: max(12px, env(safe-area-inset-top)) 12px auto; margin: auto; width: fit-content; max-width: calc(100% - 24px); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; border: 1px solid var(--ui-border); border-radius: 12px; background: var(--ui-bg-elevated); color: var(--ui-text); box-shadow: 0 8px 32px #0006; font-size: 14px; }
 .app-status small { width: 100%; }
+.telegram-integration { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--ui-border); }
+.telegram-guide { font-size: 14px; line-height: 1.6; }
+.telegram-guide summary { cursor: pointer; font-weight: 600; }
+.telegram-guide ol { padding-left: 20px; list-style: decimal; }
+.telegram-guide li { margin-top: 12px; }
+.telegram-guide a { color: var(--ui-primary); text-decoration: underline; }
 
 :root, .dark {
   color-scheme: dark;

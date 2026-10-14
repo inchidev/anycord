@@ -1,6 +1,27 @@
 import { z } from 'zod'
 export const AUTH_SESSION_CLOSE_CODE = 4001
 
+export const authenticationInputSchema = z.object({
+  passwordLogin: z.boolean().default(true), registration: z.boolean().default(true),
+  telegramLogin: z.boolean().default(false), miniAppLogin: z.boolean().default(false),
+})
+export const telegramIntegrationInputSchema = z.object({
+  botToken: z.string().trim().max(256).refine(v => !v || /^\d+:[A-Za-z0-9_-]{20,}$/.test(v), 'Enter a valid bot token').optional(),
+  clientId: z.string().trim().max(32).regex(/^\d*$/, 'Client ID must contain digits').default(''),
+  clientSecret: z.string().trim().max(512).optional(), notifications: z.boolean().default(false),
+})
+export const telegramIntegrationStatusSchema = z.object({
+  botConfigured: z.boolean(), botUsername: z.string(), clientId: z.string(), oidcConfigured: z.boolean(),
+  notifications: z.boolean(), origin: z.string(), callbackURL: z.string(), miniAppURL: z.string(), webhookURL: z.string(),
+})
+export const telegramPreferencesInputSchema = z.object({
+  enabled: z.boolean(), preview: z.boolean(), mutedChannelIds: z.array(z.string().min(1).max(128)).max(100),
+})
+export const telegramAccountStatusSchema = telegramPreferencesInputSchema.extend({
+  linked: z.boolean(), canUnlink: z.boolean(), canSetPassword: z.boolean(), botUsername: z.string(),
+  notificationsAvailable: z.boolean(), messagingAllowed: z.boolean(), browserLogin: z.boolean(), miniAppLogin: z.boolean(),
+})
+
 export const credentialsSchema = z.object({
   name: z.string().trim().min(2, 'Use at least 2 characters for your username.').max(32, 'Use no more than 32 characters.').regex(/^[a-zA-Z0-9_ -]+$/, 'Use letters, numbers, spaces, - or _'),
   setupCode: z.string().max(128).optional(),

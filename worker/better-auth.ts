@@ -2,7 +2,7 @@ import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { bearer } from 'better-auth/plugins/bearer'
 import { username } from 'better-auth/plugins/username'
-import { createAuthEndpoint } from 'better-auth/api'
+import { APIError, createAuthEndpoint } from 'better-auth/api'
 import { setSessionCookie } from 'better-auth/cookies'
 import { hashPassword as betterHash, verifyPassword as betterVerify } from 'better-auth/crypto'
 import { drizzle } from 'drizzle-orm/d1'
@@ -11,14 +11,16 @@ import { authUsers, authSessions, authAccounts, authVerifications } from '../db/
 import { sessions, users, memberships } from '../db/schema'
 import { database } from './store'
 import { digest, verifyPassword as legacyVerify } from './security'
+import { authenticationConfig, initialized, type AuthenticationConfig } from './authentication'
+import { telegramMiniApp, telegramOIDC } from './telegram-plugin'
 
 function legacyToken(headers: Headers | undefined) { return headers?.get('cookie')?.match(/(?:^|;\s*)cellcord_session=([a-f0-9]{64})/)?.[1] || '' }
-export async function ensureProfile(env: Env, identity: { id: string; name: string }) {
+export async function ensureProfile(env: Env, identity: { id: string; name: string; username?: string | null }) {
   const existing = await database(env).select({ id: users.id, name: users.name, color: users.color, role: users.role }).from(users).where(eq(users.id, identity.id)).get()
   if (existing) return existing
   const color = ['#5865f2', '#57f287', '#eb459e', '#fee75c', '#2dc4c4', '#f79356'][parseInt((await digest(identity.id)).slice(0, 2), 16) % 6] || '#5865f2'
   await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO users (id, name, password_hash, color, role, created_at) SELECT ?, ?, 'disabled', ?, CASE WHEN EXISTS (SELECT 1 FROM users WHERE role = 'owner') THEN 'member' ELSE 'owner' END, ?").bind(identity.id, identity.name.toLowerCase(), color, Date.now()),
+    env.DB.prepare("INSERT OR IGNORE INTO users (id, name, password_hash, color, role, created_at) SELECT ?, ?, 'disabled', ?, CASE WHEN EXISTS (SELECT 1 FROM users WHERE role = 'owner') THEN 'member' ELSE 'owner' END, ?").bind(identity.id, identity.username || identity.name.toLowerCase(), color, Date.now()),
     env.DB.prepare("INSERT OR IGNORE INTO memberships (user_id, workspace_id, role) SELECT id, 'main', CASE WHEN role = 'owner' THEN 'owner' ELSE 'member' END FROM users WHERE id = ?").bind(identity.id),
   ])
   return database(env).select({ id: users.id, name: users.name, color: users.color, role: users.role }).from(users).where(eq(users.id, identity.id)).get()
@@ -30,7 +32,7 @@ export async function revokeLiveSession(env: Env, token: string, userId: string)
     console.warn(JSON.stringify({ event: 'live_session_revoke_failed', workspaceId: row.workspaceId }))
   })))
 }
-export function createAuth(env: Env) {
+export function createAuth(env: Env, oidc?: AuthenticationConfig) {
   const db = drizzle(env.DB)
   return betterAuth({
     appName: 'Anycord', secret: env.APP_SECRET,
@@ -39,7 +41,11 @@ export function createAuth(env: Env) {
     telemetry: { enabled: false },
     logger: { disabled: true },
     database: drizzleAdapter(db, { provider: 'sqlite', transaction: false, schema: { user: authUsers, session: authSessions, account: authAccounts, verification: authVerifications } }),
-    advanced: { cookiePrefix: 'cellcord', useSecureCookies: env.AUTH_BASE_URL.startsWith('https:'), database: { generateId: () => crypto.randomUUID() } },
+    advanced: { cookiePrefix: 'cellcord', useSecureCookies: env.AUTH_BASE_URL.startsWith('https:'), database: { generateId: () => crypto.randomUUID() },
+      // Telegram Web embeds Mini Apps. Partitioned session cookies also keep
+      // that session separate from the standalone browser's installation session.
+      cookies: env.AUTH_BASE_URL.startsWith('https:') ? { session_token: { attributes: { sameSite: 'none', secure: true, partitioned: true } } } : undefined,
+    },
     emailAndPassword: {
       enabled: true, minPasswordLength: 10, maxPasswordLength: 128, requireEmailVerification: false,
       password: {
@@ -48,10 +54,19 @@ export function createAuth(env: Env) {
       },
     },
     session: { expiresIn: 7 * 86400, cookieCache: { enabled: false } },
+    // Telegram does not supply email. Trust its verified identity for explicit
+    // linking only; email/name-based implicit linking stays disabled.
+    account: { encryptOAuthTokens: true, accountLinking: { enabled: true, trustedProviders: ['telegram'], disableImplicitLinking: true, allowDifferentEmails: true } },
     databaseHooks: {
-      user: { create: { after: async (user) => { await ensureProfile(env, user) } } },
+      user: { create: {
+        before: async (user) => {
+          if (await initialized(env) && !(await authenticationConfig(env)).registration) throw new APIError('FORBIDDEN', { message: 'Registration is closed on this installation' })
+          return { data: user }
+        },
+        after: async (user) => { await ensureProfile(env, user) },
+      } },
     },
-    plugins: [bearer({ requireSignature: true }), username({ minUsernameLength: 2, maxUsernameLength: 32, displayUsername: false, immutableUsername: true, usernameValidator: (value) => /^[a-zA-Z0-9_ -]+$/.test(value) }), {
+    plugins: [telegramOIDC(oidc), telegramMiniApp(env), bearer({ requireSignature: true }), username({ minUsernameLength: 2, maxUsernameLength: 32, displayUsername: false, immutableUsername: true, usernameValidator: (value) => /^[a-zA-Z0-9_ -]+$/.test(value) }), {
       id: 'legacy-session-migration',
       endpoints: {
         migrateLegacySession: createAuthEndpoint('/migrate-legacy-session', { method: 'POST' }, async (ctx) => {

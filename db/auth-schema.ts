@@ -1,4 +1,5 @@
-import { integer, sqliteTable, text, index } from 'drizzle-orm/sqlite-core'
+import { integer, sqliteTable, text, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
 
 export const authUsers = sqliteTable('auth_user', {
   id: text('id').primaryKey(), name: text('name').notNull(),
@@ -20,7 +21,10 @@ export const authAccounts = sqliteTable('auth_account', {
   accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp_ms' }), refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp_ms' }),
   scope: text('scope'), password: text('password'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(), updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-}, (t) => [index('auth_account_user').on(t.userId)])
+}, (t) => [index('auth_account_user').on(t.userId),
+  uniqueIndex('auth_telegram_identity').on(t.providerId, t.accountId).where(sql`${t.providerId} = 'telegram'`),
+  uniqueIndex('auth_telegram_user').on(t.userId).where(sql`${t.providerId} = 'telegram'`),
+])
 export const authVerifications = sqliteTable('auth_verification', {
   id: text('id').primaryKey(), identifier: text('identifier').notNull(), value: text('value').notNull(),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(), createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(), updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),

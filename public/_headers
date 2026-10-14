@@ -1,3 +1,5 @@
+/*
+  Content-Security-Policy: frame-ancestors 'self' https://web.telegram.org
 /sw.js
   Cache-Control: no-cache
 /version.json

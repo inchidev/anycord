@@ -7,6 +7,7 @@ A familiar chat client for independent communities. Run an installation on Cloud
 - Multiple communities on one installation, with membership checked for every server, channel, message, search and file request.
 - Independent remote connections, accounts and drafts.
 - Optional Cloudflare RealtimeKit huddles and OpenRouter assistant integration.
+- Optional Telegram OIDC and Mini App login, account linking and opt-in bot notifications. See [authentication setup](docs/authentication.md).
 
 The Nuxt frontend is generated as a static SPA. There is no separate Nitro application server. celld and native Cloudflare implement the shared API; TrailBase and PocketBase adapters are planned. See [API contract](API_CONTRACT.md), [engine research](ENGINE_RESEARCH.md) and [deployment](DEPLOYMENT.md).
 

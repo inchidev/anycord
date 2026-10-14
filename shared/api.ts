@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { passwordProofSchema, recoveryResetSchema, inviteInputSchema, inviteTokenSchema, inviteResultSchema } from './contracts'
+import { authenticationInputSchema, telegramIntegrationInputSchema, telegramIntegrationStatusSchema, telegramPreferencesInputSchema, telegramAccountStatusSchema } from './contracts'
 import {
   attachmentInputSchema, attachmentSchema, storageInputSchema, storageStatusSchema, bootstrapSchema, channelSchema, credentialsSchema, editMessageSchema, idSchema, integrationSchema,
   integrationsSchema, messageResultSchema, messageSchema, reactionSchema, searchResultSchema, threadCreateSchema, threadSchema, userSchema, workspaceSchema, workspaceUpdateSchema, workspaceResultSchema, channelUpdateSchema, channelResultSchema,
@@ -28,7 +29,19 @@ function endpoint(method: string, path: string, body: z.ZodType, response: z.Zod
 // Operational migration routes and Better Auth's native endpoints are not public app endpoints.
 export const endpoints = {
   runtime: endpoint('GET', '/api/runtime', none, z.object({ apiVersion: z.literal(API_VERSION), engine: engineSchema, auth: z.literal('better-auth'), realtime: z.literal('websocket'), build: z.object({ version: z.string(), commit: z.string(), apiVersion: z.number().int(), schema: z.string() }).optional() })),
-  authStatus: endpoint('GET', '/api/auth/status', none, z.object({ initialized: z.boolean(), setupRequired: z.boolean().default(false), user: userSchema.nullable() })),
+  authStatus: endpoint('GET', '/api/auth/status', none, z.object({ initialized: z.boolean(), setupRequired: z.boolean().default(false), user: userSchema.nullable(), methods: authenticationInputSchema.optional() })),
+  authentication: endpoint('GET', '/api/installation/authentication', none, authenticationInputSchema),
+  authenticationUpdate: endpoint('PUT', '/api/installation/authentication', authenticationInputSchema, authenticationInputSchema),
+  telegramIntegration: endpoint('GET', '/api/integrations/telegram', none, telegramIntegrationStatusSchema),
+  telegramIntegrationUpdate: endpoint('PUT', '/api/integrations/telegram', telegramIntegrationInputSchema, telegramIntegrationStatusSchema),
+  telegramWebhookSetup: endpoint('POST', '/api/integrations/telegram/webhook', none, ok),
+  telegramAccount: endpoint('GET', '/api/account/telegram', none, telegramAccountStatusSchema),
+  telegramPreferences: endpoint('PUT', '/api/account/telegram', telegramPreferencesInputSchema, telegramAccountStatusSchema),
+  telegramUnlink: endpoint('DELETE', '/api/account/telegram', none, ok),
+  telegramTest: endpoint('POST', '/api/account/telegram/test', none, ok),
+  accountPassword: endpoint('POST', '/api/account/password', z.object({ username: credentialsSchema.shape.name, password: credentialsSchema.shape.password }), ok),
+  threadFollow: endpoint('GET', '/api/channels/:channelId/threads/:threadId/follow', none, z.object({ following: z.boolean() })),
+  threadFollowUpdate: endpoint('PUT', '/api/channels/:channelId/threads/:threadId/follow', z.object({ following: z.boolean() }), z.object({ following: z.boolean() })),
   authRegister: endpoint('POST', '/api/auth/register', credentialsSchema, z.object({ user: userSchema })),
   authLogin: endpoint('POST', '/api/auth/login', credentialsSchema, z.object({ user: userSchema })),
   authLogout: endpoint('POST', '/api/auth/logout', none, z.object({ success: z.literal(true) })),
