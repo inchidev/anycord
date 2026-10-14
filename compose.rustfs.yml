@@ -1,0 +1,31 @@
+# docker compose --env-file .env.storage -f compose.yml -f compose.rustfs.yml up -d
+services:
+  chat:
+    environment:
+      STORAGE_ENDPOINT: http://rustfs:9000
+      STORAGE_BUCKET: anycord-files
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY:?Run node scripts/setup-storage.mjs first}
+      STORAGE_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY:?Run node scripts/setup-storage.mjs first}
+    depends_on:
+      rustfs:
+        condition: service_started
+  rustfs:
+    image: rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
+    command: /data
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?Run node scripts/setup-storage.mjs first}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?Run node scripts/setup-storage.mjs first}
+      RUSTFS_ADDRESS: ':9000'
+      RUSTFS_CONSOLE_ADDRESS: ':9001'
+      RUSTFS_CONSOLE_ENABLE: 'true'
+      RUSTFS_OBS_LOGGER_LEVEL: error
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - rustfs-data:/data
+    mem_limit: 1g
+volumes:
+  rustfs-data:

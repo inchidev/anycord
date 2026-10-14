@@ -1,0 +1,24 @@
+{
+  "name": "celld-local-chat",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./.output/public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "ChatRoom" },
+      { "name": "HUBS", "class_name": "WorkspaceHub" }
+    ]
+  },
+  "d1_databases": [{ "binding": "DB", "database_name": "cellcord", "database_id": "cellcord-local", "migrations_dir": "drizzle" }],
+  "vars": { "APP_SECRET": "", "MIGRATION_TOKEN": "", "AUTH_BASE_URL": "http://127.0.0.1:9876" },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["WorkspaceHub"] }
+  ]
+}

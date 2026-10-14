@@ -1,0 +1,7 @@
+Built-in imagegen, transparent output.
+
+Initial prompt:
+Use case: logo-brand. Create one final production logo symbol for Anycord, an independent chat client connecting communities on self-hosted and cloud servers. A bold compact abstract lowercase a / interlocking conversation loops, with one deliberate open notch suggesting a speech tail. Simple flat vector-like silhouette, friendly precision, strong recognizable negative space, few broad strokes, readable at 24px. Saturated periwinkle violet #7778ff with a small pale-lavender accent only if essential. Single centered standalone mark filling about 80 percent of a square canvas. True transparent background. No words, no letters outside the abstract symbol, no presentation board, no mockup, no gradient, no shadow, no Discord gamepad/face/eyes, no letter C, no border. Deliver one polished symbol for use as app logo and favicon.
+
+Final refinement prompt:
+Refine this Anycord app logo into a clean final vector-like icon. Keep the exact distinctive interlocking lowercase a silhouette and proportions. Remove every speckle, grain, noisy dot and stray pixel outside and inside the symbol. Use perfectly solid flat periwinkle #7778ff and one solid pale lavender #b6b6ff inner segment. No gradients, no shading, no texture, no shadow, no outline. All negative spaces and the background must be fully transparent with smooth clean anti-aliased edges. The symbol should occupy 85 percent of a square canvas and be visually centered. No text. Professional crisp app icon, legible at 24px.

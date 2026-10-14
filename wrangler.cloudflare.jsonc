@@ -1,0 +1,75 @@
+{
+  "name": "anycord",
+  "main": "worker/cloudflare.ts",
+  "compatibility_date": "2026-10-14",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./.output/public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "ChatRoom"
+      },
+      {
+        "name": "HUBS",
+        "class_name": "WorkspaceHub"
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "anycord",
+      "database_id": "bdcc0b49-ee61-44cc-a56c-b51ec98b93c1",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "anycord-files"
+    }
+  ],
+  "vars": {
+    "AUTH_BASE_URL": "https://anycord.inchi.dev",
+    "STORAGE_ENDPOINT": "",
+    "STORAGE_BUCKET": "",
+    "STORAGE_REGION": "auto"
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "ChatRoom"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "WorkspaceHub"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "invocation_logs": false
+    },
+    "redact_query_string": true
+  },
+  "triggers": {
+    "crons": [
+      "0 4 * * *"
+    ]
+  }
+}
