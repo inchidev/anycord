@@ -8,6 +8,7 @@ import { serverPath } from '../../shared/navigation'
 import { livePath } from '../../shared/api'
 import { getApiTarget } from '../utils/connection'
 import { receiveMessage } from '../data/messages'
+import { installMobileViewport, type ChatViewport } from '../utils/mobile-viewport'
 
 const api = apiFor()
 const { $connections: connections } = useNuxtApp()
@@ -53,11 +54,10 @@ const clearTyping = useDebounceFn(() => { typing.value = ''; threadTyping.value 
 const isMobile = useMediaQuery('(max-width: 700px)')
 const sidebar = useTemplateRef<HTMLElement>('sidebar')
 const navigation = useTemplateRef<HTMLElement>('navigation')
-const visualHeight = ref<number>(), visualTop = ref(0)
-function measureViewport() { visualHeight.value = isMobile.value ? window.visualViewport?.height : undefined; visualTop.value = isMobile.value ? window.visualViewport?.offsetTop || 0 : 0 }
-useEventListener(window.visualViewport, 'resize', measureViewport)
-useEventListener(window.visualViewport, 'scroll', measureViewport)
-watch(isMobile, measureViewport, { immediate: true })
+const viewport = shallowRef<ChatViewport>({ top: 0, keyboard: false })
+let stopViewport: (() => void) | undefined
+onMounted(() => { stopViewport = installMobileViewport(window, document, value => { viewport.value = value }) })
+onBeforeUnmount(() => stopViewport?.())
 const liveMessageIds = new Set<string>()
 let lastFocusedMessage: string | undefined
 const timeline = useTemplateRef<HTMLElement>('timeline')
@@ -297,7 +297,7 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
     <div v-if="auth.isPending.value" class="boot-screen" role="status"><BrandMark /><p>Opening your server…</p></div>
     <div v-else-if="auth.isError.value" class="boot-screen"><UIcon name="i-lucide-wifi-off" class="size-10" /><h1>Can’t reach your server</h1><p>{{ target.origin || 'The local server' }} may still be starting.</p><UButton @click="auth.refetch()">Try Again</UButton><UButton color="neutral" variant="ghost" @click="connections.show()">Switch installation</UButton></div>
     <div v-else-if="!user" class="boot-screen"><BrandMark /><p>Opening login…</p></div>
-    <div v-else class="discord-shell" :style="{ '--visual-height': visualHeight ? `${visualHeight}px` : undefined, '--visual-top': `${visualTop}px`, '--sidebar-width': `${sidebarWidth}px`, '--composer-bottom': `${composerLayout.bottom}px`, '--composer-height': `${composerLayout.height}px` }">
+    <div v-else class="discord-shell" :class="{ 'keyboard-open': viewport.keyboard }" :style="{ '--visual-height': viewport.height ? `${viewport.height}px` : undefined, '--visual-top': `${viewport.top}px`, '--sidebar-width': `${sidebarWidth}px`, '--composer-bottom': `${composerLayout.bottom}px`, '--composer-height': `${composerLayout.height}px` }">
       <div class="desktop-titlebar" :inert="threadModalActive"><NuxtLink class="rail-brand" to="/servers" aria-label="Your servers"><BrandMark /></NuxtLink><form ref="searchInput" class="global-search" role="search" @submit.prevent="submitSearch"><UInput v-model="search" :placeholder="`Search ${workspace?.name || 'this server'}`" aria-label="Search this server" icon="i-lucide-search" variant="none" class="w-full" @keydown.esc.stop="closeSearch" /><kbd>⌘ K</kbd></form></div>
       <div class="workspace-layout">
         <div ref="navigation" class="workspace-navigation" :class="{ open: sidebarOpen }" :inert="threadModalActive || (isMobile && !sidebarOpen)" :role="isMobile && sidebarOpen ? 'dialog' : undefined" :aria-modal="isMobile && sidebarOpen ? true : undefined" aria-label="Servers and channels">

@@ -87,7 +87,7 @@ function submit() {
   pending.value[pendingKey.value] = true
   send.mutate({ ...attempt, draftKey: key.value, pendingKey: pendingKey.value, ownerId: props.userId, workspaceId: props.workspaceId })
 }
-function focus() { surface.value?.querySelector('textarea')?.focus() }
+function focus() { surface.value?.querySelector('textarea')?.focus({ preventScroll: true }) }
 async function insertText(text: string) {
   const input = surface.value?.querySelector('textarea')
   const start = input?.selectionStart ?? draft.value.length, end = input?.selectionEnd ?? start

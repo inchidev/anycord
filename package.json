@@ -17,7 +17,8 @@
     "test:integration": "node scripts/integration.mjs",
     "test:connections": "node scripts/test-connections.mjs",
     "test:servers": "node scripts/test-server-list.mjs",
-    "verify": "npm run typecheck && npm run test:contract && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run build",
+    "test:viewport": "node scripts/test-mobile-viewport.mjs",
+    "verify": "npm run typecheck && npm run test:contract && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && npm run build",
     "prepare:cloudflare": "npm run build && node scripts/prepare-cloudflare-config.mjs"
   },
   "dependencies": {
