@@ -36,9 +36,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh api "repos/$GH_REPO/immutable-releases" --jq '.enabled' | grep -qx true
-          node -e "const fs=require('fs'); fs.writeFileSync('release-notes.md', fs.readFileSync('CHANGELOG.md','utf8') + '\\nSource commit: ' + process.env.GITHUB_SHA + '\\n')"
+          # Immutability is enabled by the repository administrator. Reading that
+          # setting requires Administration access, unavailable to GITHUB_TOKEN.
+          node -e "const fs=require('fs'); fs.writeFileSync('release-notes.md', fs.readFileSync('CHANGELOG.md','utf8') + '\nSource commit: ' + process.env.GITHUB_SHA + '\n')"
           gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/v$ANYCORD_RELEASE_VERSION" -f sha="$GITHUB_SHA"
           gh release create "v$ANYCORD_RELEASE_VERSION" --verify-tag --draft --title "Anycord $ANYCORD_RELEASE_VERSION" --generate-notes --notes-file release-notes.md
           gh release upload "v$ANYCORD_RELEASE_VERSION" release/*
           gh release edit "v$ANYCORD_RELEASE_VERSION" --draft=false --latest
+          gh release view "v$ANYCORD_RELEASE_VERSION" --json isImmutable --jq '.isImmutable' | grep -qx true
