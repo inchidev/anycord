@@ -15,6 +15,13 @@ import migrations from './migrations.json'
 import buildInfo from '../shared/build-info.json'
 import { attachmentContent, cleanupAttachments, createAttachment, deleteAttachment, downloadAttachment, storageStatus, testStorage, updateStorage, uploadAttachment } from './storage'
 import { askAI, testAI, integrationStatus, leaveHuddle, realtimeRequest } from './services'
+import { authenticationConfig, authenticationStatus, authenticationMethods, initialized, updateAuthentication, telegramStatus, updateTelegramIntegration, configureTelegramWebhook } from './authentication'
+import { authenticationInputSchema, telegramIntegrationInputSchema, telegramPreferencesInputSchema } from '../shared/contracts'
+import { telegramAccount, updateTelegramPreferences, unlinkTelegram, telegramWebhook, queueTelegramNotifications, flushTelegramNotifications, testTelegramNotification } from './telegram-notifications'
+import { authAccounts, authUsers } from '../db/auth-schema'
+import { safeNext } from '../shared/navigation'
+import { profileColumns, publicProfileName, telegramProfileJoin, applyTelegramProfile, userProfile } from './user-profiles'
+import { verifyMiniAppData, miniAppProfile } from './telegram-plugin'
 
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
 const hub = (env: Env, workspaceId: string) => env.HUBS.getByName(workspaceId)
@@ -22,7 +29,7 @@ async function publish(env: Env, workspaceId: string, event: LiveEvent) {
   // D1 is the source of truth. A failed notification never rolls back an acknowledged write.
   try { await hub(env, workspaceId).emit(event) } catch { console.warn(JSON.stringify({ event: 'broadcast_failed', workspaceId })) }
 }
-async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare'): Promise<Response> {
+async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare', ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url), path = url.pathname, method = request.method
   if (!path.startsWith('/api/')) {
     const response = await env.ASSETS.fetch(request)
@@ -52,6 +59,12 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
       return json({ ok, runtime: engine, storage: 'D1', schema: latest?.name || null, build: buildInfo }, ok ? 200 : 503)
     } catch { return json({ ok: false, message: 'Database migrations are starting' }, 503) }
   }
+  if (path === '/api/telegram/webhook' && method === 'POST') {
+    const config = await authenticationConfig(env)
+    if (!config.botToken || !config.webhookSecret || !await equalSecret(request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '', config.webhookSecret)) throw new HttpError(403, 'Invalid Telegram webhook secret')
+    await telegramWebhook(env, await readBody(request))
+    return json({ ok: true })
+  }
   const contentId = path.match(/^\/api\/attachments\/([a-f0-9-]+)\/content$/)?.[1]
   if (contentId && method === 'GET') return attachmentContent(env, contentId, request)
   const origin = request.headers.get('Origin')
@@ -64,7 +77,8 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     request = new Request(request, { headers })
   }
   const foreign = !!origin && origin !== url.origin
-  const explicitLogin = endpoint?.name === 'connectionLogin' || endpoint?.name === 'authStatus'
+  const oidcCallback = path === '/api/auth/callback/telegram' && method === 'GET'
+  const explicitLogin = endpoint?.name === 'connectionLogin' || endpoint?.name === 'authStatus' || oidcCallback
   if ((foreign || request.headers.get('Sec-Fetch-Site') === 'cross-site') && !explicitLogin && !request.headers.get('Authorization')?.startsWith('Bearer ')) throw new HttpError(403, 'Remote connections require explicit sign in')
   if (foreign || request.headers.has('Authorization')) {
     const headers = new Headers(request.headers); headers.delete('cookie')
@@ -89,11 +103,13 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     if (request.headers.get('cookie')?.includes('cellcord_session=')) {
       const response = await createAuth(env).api.migrateLegacySession({ headers: request.headers, asResponse: true })
       const migration = await response.json() as { migrated: boolean; user: User | null }
-      if (migration.migrated) return Response.json({ initialized, user: migration.user }, { headers: response.headers })
+      if (migration.migrated) return Response.json({ initialized, user: migration.user, methods: await authenticationStatus(env) }, { headers: response.headers })
     }
-    return json({ initialized, setupRequired: !initialized && !!env.SETUP_TOKEN, user: await currentUser(request, env) })
+    return json({ initialized, setupRequired: !initialized && !!env.SETUP_TOKEN, user: await currentUser(request, env), methods: await authenticationStatus(env) })
   }
   if (endpoint?.name === 'authRegister' || endpoint?.name === 'authLogin' || endpoint?.name === 'connectionLogin') {
+    const policy = await authenticationConfig(env)
+    if (await initialized(env) && (!policy.passwordLogin || (endpoint.name === 'authRegister' && !policy.registration))) throw new HttpError(403, endpoint.name === 'authRegister' ? 'Registration is closed on this installation' : 'Password login is disabled on this installation')
     const input = credentialsSchema.parse(await readBody(request))
     if (endpoint.name === 'authRegister' && env.SETUP_TOKEN && !await db.select({ id: tables.users.id }).from(tables.users).where(eq(tables.users.role, 'owner')).get() && !await equalSecret(input.setupCode || '', env.SETUP_TOKEN)) throw new HttpError(403, 'Enter the installation setup code to create the first account')
     const name = input.name.toLowerCase()
@@ -116,6 +132,30 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     return Response.json({ user }, { status: endpoint.name === 'authRegister' ? 201 : 200, headers: response.headers })
   }
   if (path.startsWith('/api/auth/')) {
+    if (path === '/api/auth/telegram/miniapp' && method === 'POST') {
+      if (foreign || origin !== url.origin) throw new HttpError(403, 'Open the Mini App on this installation')
+      if (!await hub(env, '_auth').consumeRate(`telegram:${request.headers.get('CF-Connecting-IP') || 'local'}`, 20)) throw new HttpError(429, 'Too many Telegram login attempts')
+      const input = z.object({ initData: z.string().min(1).max(16_000), link: z.boolean().default(false) }).parse(await readBody(request))
+      return createAuth(env).handler(new Request(request.url, { method, headers: request.headers, body: JSON.stringify(input) }))
+    }
+    if (oidcCallback || (['/api/auth/sign-in/social', '/api/auth/link-social'].includes(path) && method === 'POST')) {
+      const config = await authenticationConfig(env)
+      if (!authenticationMethods(config).telegramLogin || !await initialized(env)) throw new HttpError(403, 'Telegram browser login is unavailable')
+      if (!oidcCallback) {
+        if (foreign || origin !== url.origin) throw new HttpError(403, 'Open Telegram login on this installation')
+        if (!await hub(env, '_auth').consumeRate(`telegram:${request.headers.get('CF-Connecting-IP') || 'local'}`, 20)) throw new HttpError(429, 'Too many Telegram login attempts')
+        const linking = path === '/api/auth/link-social'
+        const current = await currentUser(request, env)
+        if (linking && !current) throw new HttpError(401, 'Sign in before linking Telegram')
+        if (!linking && current) throw new HttpError(409, 'Already signed in. Link Telegram in User Settings.')
+        if (linking && await db.select().from(authAccounts).where(and(eq(authAccounts.userId, current!.id), eq(authAccounts.providerId, 'telegram'))).get()) throw new HttpError(409, 'Telegram is already linked. Unlink it before changing accounts.')
+        const input = z.object({ provider: z.literal('telegram'), callbackURL: z.string().max(2048).optional() }).parse(await readBody(request))
+        const body = { provider: input.provider, callbackURL: new URL(safeNext(input.callbackURL), env.AUTH_BASE_URL).href,
+          errorCallbackURL: new URL('/login?telegram=error', env.AUTH_BASE_URL).href, disableRedirect: true }
+        return createAuth(env, config).handler(new Request(request.url, { method, headers: request.headers, body: JSON.stringify(body) }))
+      }
+      return createAuth(env, config).handler(request)
+    }
     if ((path === '/api/auth/logout' || path === '/api/auth/sign-out') && method === 'POST') {
       const auth = createAuth(env)
       const session = await auth.api.getSession({ headers: request.headers })
@@ -128,6 +168,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     const allowed = ['/api/auth/sign-in/username', '/api/auth/sign-out', '/api/auth/get-session', '/api/auth/is-username-available', '/api/auth/migrate-legacy-session']
     if (!allowed.includes(path)) throw new HttpError(404, 'Not found')
     if (path === '/api/auth/sign-in/username' && method === 'POST') {
+      if (!(await authenticationConfig(env)).passwordLogin) throw new HttpError(403, 'Password login is disabled on this installation')
       const input = z.object({ username: z.string().min(2).max(32), password: z.string().max(128) }).passthrough().parse(await readBody(request))
       if (!await hub(env, '_auth').consumeRate(`auth:${input.username.toLowerCase()}`, 15)) throw new HttpError(429, 'Too many attempts. Try again in a minute.')
       return createAuth(env).handler(new Request(request.url, { method, headers: request.headers, body: JSON.stringify(input) }))
@@ -165,7 +206,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
       await db.delete(tables.invitations).where(and(eq(tables.invitations.id, endpoint.params.inviteId!), eq(tables.invitations.workspaceId, workspaceId))).run()
       return json({ ok: true })
     }
-    if (endpoint.name === 'bans') return json(await db.select({ id: tables.users.id, name: tables.users.name, createdAt: tables.workspaceBans.createdAt }).from(tables.workspaceBans).innerJoin(tables.users, eq(tables.workspaceBans.userId, tables.users.id)).where(eq(tables.workspaceBans.workspaceId, workspaceId)).all())
+    if (endpoint.name === 'bans') return json(await db.select({ id: tables.users.id, name: publicProfileName, createdAt: tables.workspaceBans.createdAt }).from(tables.workspaceBans).innerJoin(tables.users, eq(tables.workspaceBans.userId, tables.users.id)).leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin).where(eq(tables.workspaceBans.workspaceId, workspaceId)).all())
     if (endpoint.name === 'memberUnban') {
       await db.delete(tables.workspaceBans).where(and(eq(tables.workspaceBans.workspaceId, workspaceId), eq(tables.workspaceBans.userId, endpoint.params.userId!))).run()
       return json({ ok: true })
@@ -173,6 +214,54 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     const removed = await hub(env, workspaceId).removeMember(workspaceId, user.id, endpoint.params.userId!, endpoint.name === 'memberBan')
     if (!removed.ok) throw new HttpError(removed.status, removed.message)
     await publish(env, workspaceId, { type: 'refresh' })
+    return json({ ok: true })
+  }
+  if (['authentication', 'authenticationUpdate', 'telegramIntegration', 'telegramIntegrationUpdate', 'telegramWebhookSetup'].includes(endpoint?.name || '')) {
+    if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can configure authentication and bot credentials')
+    if (endpoint?.name === 'authentication') return json(await authenticationStatus(env))
+    if (endpoint?.name === 'authenticationUpdate') return json(await updateAuthentication(env, user.id, authenticationInputSchema.parse(await readBody(request))))
+    if (endpoint?.name === 'telegramIntegration') return json(telegramStatus(env, await authenticationConfig(env)))
+    if (endpoint?.name === 'telegramIntegrationUpdate') return json(await updateTelegramIntegration(env, user.id, telegramIntegrationInputSchema.parse(await readBody(request))))
+    await configureTelegramWebhook(env); return json({ ok: true })
+  }
+  if (endpoint?.name === 'telegramAccount') return json(await telegramAccount(env, user.id))
+  if (endpoint?.name === 'telegramProfileSync') {
+    const config = await authenticationConfig(env)
+    if (!config.miniAppLogin || !config.botToken) throw new HttpError(403, 'Mini App profile sync is unavailable')
+    const { initData } = endpoint.spec.body.parse(await readBody(request)) as { initData: string }
+    let telegram
+    try { telegram = await verifyMiniAppData(initData, config.botToken) }
+    catch { throw new HttpError(401, 'Reopen the Mini App to refresh your Telegram profile') }
+    const linked = await db.select().from(authAccounts).where(and(eq(authAccounts.userId, user.id), eq(authAccounts.providerId, 'telegram'), eq(authAccounts.accountId, String(telegram.id)))).get()
+    if (!linked) throw new HttpError(403, 'This Telegram account is not linked to your account')
+    if (!await hub(env, '_auth').consumeRate(`telegram-profile:${user.id}`, 15)) throw new HttpError(429, 'Please wait before refreshing your profile')
+    await applyTelegramProfile(env, user.id, miniAppProfile(telegram))
+    return json(await userProfile(env, user.id))
+  }
+  if (endpoint?.name === 'telegramPreferences') return json(await updateTelegramPreferences(env, user.id, telegramPreferencesInputSchema.parse(await readBody(request))))
+  if (endpoint?.name === 'telegramUnlink') { await unlinkTelegram(env, user.id); return json({ ok: true }) }
+  if (endpoint?.name === 'telegramTest') {
+    if (!await hub(env, '_auth').consumeRate(`telegram-test:${user.id}`, 3)) throw new HttpError(429, 'Please wait before sending another test')
+    await testTelegramNotification(env, user.id); return json({ ok: true })
+  }
+  if (endpoint?.name === 'accountPassword') {
+    const auth = createAuth(env)
+    const session = await auth.api.getSession({ headers: request.headers })
+    if (!session || Date.now() - new Date(session.session.createdAt).getTime() > 600_000) throw new HttpError(403, 'Sign in again before adding a password')
+    const input = endpoint.spec.body.parse(await readBody(request)) as { username: string; password: string }
+    if (!(await telegramAccount(env, user.id)).canSetPassword) throw new HttpError(409, 'This account already has a password')
+    const username = input.username.toLowerCase()
+    const taken = await db.select().from(authUsers).where(eq(authUsers.username, username)).get()
+    const profileTaken = await db.select().from(tables.users).where(eq(tables.users.name, username)).get()
+    if ((taken && taken.id !== user.id) || (profileTaken && profileTaken.id !== user.id)) throw new HttpError(409, 'Choose another username')
+    // Reserve the login name first. If freshness/password validation fails, the
+    // same account can retry without leaving an inaccessible credential behind.
+    await db.batch([
+      db.update(authUsers).set({ username }).where(eq(authUsers.id, user.id)),
+      db.update(tables.users).set({ name: username }).where(eq(tables.users.id, user.id)),
+    ])
+    const response = await auth.api.setPassword({ headers: request.headers, body: { newPassword: input.password }, asResponse: true })
+    if (!response.ok) return response
     return json({ ok: true })
   }
   if (endpoint?.name === 'liveTicket') {
@@ -198,7 +287,8 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     const workspaceId = url.searchParams.get('workspace') || spaces[0]?.id || 'main'
     await requireMembership(env, user.id, workspaceId)
     const channels = await db.select().from(tables.channels).where(eq(tables.channels.workspaceId, workspaceId)).orderBy(tables.channels.position).all()
-    const members = await db.select({ id: tables.users.id, name: tables.users.name, color: tables.users.color, role: tables.users.role, workspaceRole: tables.memberships.role }).from(tables.users)
+    const members = await db.select({ ...profileColumns, workspaceRole: tables.memberships.role }).from(tables.users)
+      .leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin)
       .innerJoin(tables.memberships, and(eq(tables.memberships.userId, tables.users.id), eq(tables.memberships.workspaceId, workspaceId))).all()
     return json({ user, workspaces: spaces, channels, members })
   }
@@ -248,8 +338,9 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     await requireMembership(env, user.id, workspaceId)
     const q = (url.searchParams.get('q') || '').trim().slice(0, 100)
     if (!q) return json([])
-    const rows = await db.select({ id: tables.messages.id, text: tables.messages.text, channelId: tables.channels.id, channel: tables.channels.name, authorId: tables.users.id, author: tables.users.name, createdAt: tables.messages.createdAt, threadId: tables.messages.threadId })
+    const rows = await db.select({ id: tables.messages.id, text: tables.messages.text, channelId: tables.channels.id, channel: tables.channels.name, authorId: tables.users.id, author: publicProfileName, createdAt: tables.messages.createdAt, threadId: tables.messages.threadId })
       .from(tables.messages).innerJoin(tables.channels, eq(tables.channels.id, tables.messages.channelId)).innerJoin(tables.users, eq(tables.users.id, tables.messages.authorId))
+      .leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin)
       .where(and(eq(tables.channels.workspaceId, workspaceId), sql`instr(lower(${tables.messages.text}), lower(${q})) > 0`))
       .orderBy(desc(tables.messages.createdAt)).limit(40).all()
     return json(rows.map(({ authorId, ...row }) => ({ ...row, author: authorId === 'system' ? 'Anycord' : row.author })))
@@ -257,6 +348,16 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
   if (endpoint?.params.channelId) {
     const channelId = endpoint.params.channelId, item = endpoint.params.messageId || endpoint.params.participantId
     const channel = await requireChannel(env, user, channelId)
+    if (endpoint.name === 'threadFollow' || endpoint.name === 'threadFollowUpdate') {
+      await requireThread(env, channelId, endpoint.params.threadId!)
+      const key = and(eq(tables.threadFollowers.userId, user.id), eq(tables.threadFollowers.threadId, endpoint.params.threadId!))
+      if (endpoint.name === 'threadFollowUpdate') {
+        const input = z.object({ following: z.boolean() }).parse(await readBody(request))
+        if (input.following) await db.insert(tables.threadFollowers).values({ userId: user.id, threadId: endpoint.params.threadId! }).onConflictDoNothing().run()
+        else await db.delete(tables.threadFollowers).where(key).run()
+      }
+      return json({ following: !!await db.select().from(tables.threadFollowers).where(key).get() })
+    }
     if (endpoint.name === 'attachmentCreate') return json(await createAttachment(env, user, channelId, request), 201)
     if (endpoint.name === 'channelUpdate') {
       const membership = await requireMembership(env, user.id, channel.workspaceId)
@@ -321,7 +422,10 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
       const message = (await getMessages(env, channelId, user.id, input.id))[0]
       if (!message) throw new HttpError(500, 'Could not load the saved message')
       if (message.authorId !== user.id || message.threadId !== (input.threadId || null) || message.replyToId !== (input.replyToId || null) || message.text !== input.text || JSON.stringify(message.attachments.map(f => f.id).sort()) !== JSON.stringify(fileIds.slice().sort())) throw new HttpError(409, 'Message ID already exists for a different message')
-      if (inserted) await publish(env, channel.workspaceId, { type: 'message', message })
+      if (inserted) {
+        await publish(env, channel.workspaceId, { type: 'message', message })
+        ctx.waitUntil(queueTelegramNotifications(env, channel.workspaceId, message).then(() => flushTelegramNotifications(env)).catch(() => { console.warn(JSON.stringify({ event: 'telegram_enqueue_failed' })) }))
+      }
       return json(message, inserted ? 201 : 200)
     }
     if (item && ['messageEdit', 'messageDelete', 'reactionToggle'].includes(endpoint.name)) {
@@ -405,8 +509,11 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
 // Both D1-compatible runtimes share behavior; platform bindings stay in this adapter.
 export function createD1Handler(engine: 'celld' | 'cloudflare') {
 return {
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) { ctx.waitUntil(cleanupAttachments(env)) },
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (event.cron !== '* * * * *') ctx.waitUntil(cleanupAttachments(env))
+    ctx.waitUntil(flushTelegramNotifications(env))
+  },
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const origin = request.headers.get('Origin')
     const remote = origin && origin !== new URL(request.url).origin
     const cors: Record<string, string> = {}
@@ -416,7 +523,7 @@ return {
     }
     if (request.method === 'OPTIONS' && new URL(request.url).pathname.startsWith('/api/')) return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } })
     try {
-      const response = await route(request, env, engine)
+      const response = await route(request, env, engine, ctx)
       if (response.status === 101) return response
       const headers = new Headers(response.headers)
       for (const [key, value] of Object.entries(cors)) headers.set(key, value)
@@ -428,6 +535,11 @@ return {
       headers.set('X-Content-Type-Options', 'nosniff')
       headers.set('Referrer-Policy', 'same-origin')
       headers.set('X-Frame-Options', 'DENY')
+      if (headers.get('Content-Type')?.includes('text/html')) {
+        headers.delete('X-Frame-Options')
+        const policy = (headers.get('Content-Security-Policy') || '').replace(/(?:^|;)\s*frame-ancestors[^;]*/gi, '')
+        headers.set('Content-Security-Policy', `${policy}${policy ? '; ' : ''}frame-ancestors 'self' https://web.telegram.org`)
+      }
       if (new URL(request.url).pathname.startsWith('/api/')) headers.set('Cache-Control', 'no-store')
       return new Response(response.body, { status: response.status, headers })
     } catch (error) {

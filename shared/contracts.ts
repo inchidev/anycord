@@ -1,6 +1,27 @@
 import { z } from 'zod'
 export const AUTH_SESSION_CLOSE_CODE = 4001
 
+export const authenticationInputSchema = z.object({
+  passwordLogin: z.boolean().default(true), registration: z.boolean().default(true),
+  telegramLogin: z.boolean().default(false), miniAppLogin: z.boolean().default(false),
+})
+export const telegramIntegrationInputSchema = z.object({
+  botToken: z.string().trim().max(256).refine(v => !v || /^\d+:[A-Za-z0-9_-]{20,}$/.test(v), 'Enter a valid bot token').optional(),
+  clientId: z.string().trim().max(32).regex(/^\d*$/, 'Client ID must contain digits').default(''),
+  clientSecret: z.string().trim().max(512).optional(), notifications: z.boolean().default(false),
+})
+export const telegramIntegrationStatusSchema = z.object({
+  botConfigured: z.boolean(), botUsername: z.string(), clientId: z.string(), oidcConfigured: z.boolean(),
+  notifications: z.boolean(), origin: z.string(), callbackURL: z.string(), miniAppURL: z.string(), webhookURL: z.string(),
+})
+export const telegramPreferencesInputSchema = z.object({
+  enabled: z.boolean(), preview: z.boolean(), mutedChannelIds: z.array(z.string().min(1).max(128)).max(100),
+})
+export const telegramAccountStatusSchema = telegramPreferencesInputSchema.extend({
+  linked: z.boolean(), canUnlink: z.boolean(), canSetPassword: z.boolean(), botUsername: z.string(),
+  notificationsAvailable: z.boolean(), messagingAllowed: z.boolean(), browserLogin: z.boolean(), miniAppLogin: z.boolean(),
+})
+
 export const credentialsSchema = z.object({
   name: z.string().trim().min(2, 'Use at least 2 characters for your username.').max(32, 'Use no more than 32 characters.').regex(/^[a-zA-Z0-9_ -]+$/, 'Use letters, numbers, spaces, - or _'),
   setupCode: z.string().max(128).optional(),
@@ -39,7 +60,7 @@ export const integrationSchema = z.object({
   aiModel: z.string().trim().max(120).default('openai/gpt-4.1-mini'),
 })
 // IDs are opaque: seeded and migrated IDs are not necessarily UUIDs.
-export const userSchema = z.object({ id: idSchema, name: z.string(), color: z.string(), role: z.string() })
+export const userSchema = z.object({ id: idSchema, name: z.string(), color: z.string(), role: z.string(), avatarUrl: z.string().nullable().optional(), telegram: z.boolean().optional() })
 export const workspaceResultSchema = z.object({ id: idSchema, name: z.string(), initials: z.string(), role: z.string() })
 export const channelResultSchema = z.object({ id: idSchema, workspaceId: idSchema, name: z.string(), topic: z.string(), kind: z.enum(['text', 'voice']) })
 export const threadSummarySchema = z.object({ id: idSchema, name: z.string(), messageCount: z.number().int().nonnegative() })
@@ -50,7 +71,7 @@ export const attachmentSchema = attachmentInputSchema.extend({ id: z.uuid(), con
 export const storageInputSchema = z.object({ driver: z.enum(['r2', 's3']), endpoint: z.string().trim().max(512).default(''), bucket: z.string().trim().max(63).default(''), region: z.string().trim().max(64).default('auto'), accessKeyId: z.string().trim().max(256).optional(), secretAccessKey: z.string().trim().max(512).optional() })
 export const storageStatusSchema = z.object({ configured: z.boolean(), nativeAvailable: z.boolean(), driver: z.enum(['r2', 's3']).nullable(), endpoint: z.string(), bucket: z.string(), region: z.string(), maxBytes: z.number(), maxFiles: z.number() })
 export const messageResultSchema = z.object({
-  id: idSchema, channelId: idSchema, authorId: idSchema, author: z.string(), color: z.string(), text: z.string(),
+  id: idSchema, channelId: idSchema, authorId: idSchema, author: z.string(), avatarUrl: z.string().nullable().optional(), color: z.string(), text: z.string(),
   createdAt: z.number().int(), editedAt: z.number().int().nullable(), bot: z.boolean(),
   attachments: z.array(attachmentSchema).default([]),
   reactions: z.array(z.object({ emoji: z.string(), count: z.number().int().positive(), mine: z.boolean() })),

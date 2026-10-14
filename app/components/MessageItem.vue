@@ -50,7 +50,7 @@ function save() {
 
 <template>
   <article class="message-row" :class="{ 'has-reply': message.replyToId }" :id="`message-${message.id}`" tabindex="0" @pointerdown="holdMessage" @pointermove="moveHold" @pointerup="cancelHold" @pointercancel="cancelHold" @pointerleave="cancelHold" @contextmenu="contextMenu">
-    <span class="avatar" :style="{ backgroundColor: message.color }" aria-hidden="true">{{ message.author.slice(0, 2).toUpperCase() }}</span>
+    <UserAvatar :name="message.author" :color="message.color" :src="message.avatarUrl" />
     <div class="message-content">
       <button v-if="message.replyToId" class="reply-preview" :disabled="!message.reply" @click="emit('jump', message.replyToId)"><UIcon name="i-lucide-corner-up-right" /><strong v-if="message.reply">{{ message.reply.author }}</strong><span>{{ message.reply?.text || 'Original message was deleted' }}</span></button>
       <header><strong :style="{ color: message.bot ? '#f2f3f5' : message.color }">{{ message.author }}</strong><span v-if="message.bot" class="bot-label">APP</span><time :datetime="new Date(message.createdAt).toISOString()" :title="new Date(message.createdAt).toLocaleString()">{{ isMobile ? new Date(message.createdAt).toLocaleString([], { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }}</time></header>

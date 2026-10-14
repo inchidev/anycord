@@ -17,6 +17,7 @@
   },
   "d1_databases": [{ "binding": "DB", "database_name": "cellcord", "database_id": "cellcord-local", "migrations_dir": "drizzle" }],
   "vars": { "APP_SECRET": "", "MIGRATION_TOKEN": "", "AUTH_BASE_URL": "http://127.0.0.1:9876" },
+  "triggers": { "crons": ["0 4 * * *", "* * * * *"] },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] },
     { "tag": "v2", "new_sqlite_classes": ["WorkspaceHub"] }

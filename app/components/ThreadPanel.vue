@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Message, User } from '../../shared/contracts'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 const props = defineProps<{ workspaceId: string; channelId: string; threadId: string; user: User; owner: boolean; modal: boolean; focusId?: string; typing?: string }>()
 const emit = defineEmits<{ close: []; jump: [messageId: string]; copyLink: [message: Message]; typing: [event: { type: 'typing'; channelId: string; threadId?: string }]; layout: [metrics: { bottom: number; height: number }] }>()
 const { query: thread, messages } = useThreadMessages(() => ({ userId: props.user.id, workspaceId: props.workspaceId, channelId: props.channelId, threadId: props.threadId, focus: props.focusId }))
@@ -7,6 +8,10 @@ const replyTo = ref<Message | null>(null)
 const composer = useTemplateRef('composer')
 const panel = useTemplateRef<HTMLElement>('panel'), timeline = useTemplateRef<HTMLElement>('timeline')
 const messageAction = useMessageActions()
+const api = apiFor(), client = useQueryClient(), followError = ref('')
+const followKey = computed(() => ['thread-follow', props.channelId, props.threadId])
+const follow = useQuery({ queryKey: followKey, queryFn: () => api('threadFollow', { params: { channelId: props.channelId, threadId: props.threadId } }) })
+const setFollow = useMutation({ mutationFn: () => api('threadFollowUpdate', { params: { channelId: props.channelId, threadId: props.threadId }, body: { following: !follow.data.value?.following } }), onSuccess: () => client.invalidateQueries({ queryKey: followKey.value }), onError: cause => { followError.value = apiError(cause) } })
 let restoreFocus: HTMLElement | null = null, lastFocus = ''
 onMounted(() => { restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null; if (props.modal) panel.value?.focus() })
 onBeforeUnmount(() => { if (restoreFocus?.isConnected) restoreFocus.focus() })
@@ -33,7 +38,8 @@ function keydown(event: KeyboardEvent) {
 
 <template>
   <aside ref="panel" class="thread-panel" :class="{ 'thread-overlay': modal }" :role="modal ? 'dialog' : 'complementary'" :aria-modal="modal || undefined" aria-label="Thread" tabindex="-1" @keydown="keydown">
-    <header class="thread-header"><UIcon name="i-lucide-messages-square" /><h2>{{ thread.data.value?.thread.name || 'Thread' }}</h2><UButton icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close thread" @click="emit('close')" /></header>
+    <header class="thread-header"><UIcon name="i-lucide-messages-square" /><h2>{{ thread.data.value?.thread.name || 'Thread' }}</h2><UButton :icon="follow.data.value?.following ? 'i-lucide-bell-ring' : 'i-lucide-bell'" color="neutral" variant="ghost" :aria-label="follow.data.value?.following ? 'Unfollow thread' : 'Follow thread'" :title="follow.data.value?.following ? 'Unfollow thread' : 'Follow thread for notifications'" :disabled="!follow.data.value" :loading="setFollow.isPending.value" @click="followError = ''; setFollow.mutate()" /><UButton icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close thread" @click="emit('close')" /></header>
+    <UAlert v-if="followError" color="error" :title="followError" />
     <div ref="timeline" class="thread-timeline" role="log" aria-label="Thread messages" aria-live="polite">
       <p v-if="thread.isPending.value" class="thread-notice">Loading thread…</p>
       <div v-else-if="thread.isError.value" class="content-error"><p>{{ apiError(thread.error.value) }}</p><UButton @click="thread.refetch()">Try again</UButton></div>

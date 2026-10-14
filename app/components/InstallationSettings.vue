@@ -5,8 +5,8 @@ import { integrationSchema } from '../../shared/contracts'
 import { apiFor } from '../utils/api'
 const open = defineModel<boolean>('open', { default: false })
 const owner = true
-const tab = ref('integrations')
-watch(open, value => { if (value) tab.value = 'integrations' })
+const tab = ref('authentication')
+watch(open, value => { if (value) tab.value = 'authentication' })
 const feedback = ref('')
 const error = ref('')
 const queryClient = useQueryClient()
@@ -40,7 +40,8 @@ watch(open, (value) => { if (!value) { state.realtimeToken = ''; state.openroute
 </script>
 <template>
 <SettingsFrame v-model:open="open" title="Installation Settings" label="INSTALLATION OWNER">
-<template #navigation><button :class="{ active: tab === 'integrations' }" @click="tab = 'integrations'"><UIcon name="i-lucide-plug" />Integrations</button><button :class="{ active: tab === 'storage' }" @click="tab = 'storage'"><UIcon name="i-lucide-hard-drive" />File storage</button><button :class="{ active: tab === 'database' }" @click="tab = 'database'"><UIcon name="i-lucide-database" />Database</button></template>
+<template #navigation><button :class="{ active: tab === 'authentication' }" @click="tab = 'authentication'"><UIcon name="i-lucide-shield-check" />Authentication</button><button :class="{ active: tab === 'integrations' }" @click="tab = 'integrations'"><UIcon name="i-lucide-plug" />Integrations</button><button :class="{ active: tab === 'storage' }" @click="tab = 'storage'"><UIcon name="i-lucide-hard-drive" />File storage</button><button :class="{ active: tab === 'database' }" @click="tab = 'database'"><UIcon name="i-lucide-database" />Database</button></template>
+          <AuthenticationSettings v-if="tab === 'authentication'" />
           <template v-if="tab === 'integrations'">
             <h2>Integrations</h2><p class="section-description">Connect services for every community on this installation. Credentials stay encrypted on the installation.</p>
             <UAlert v-if="integrations.isError.value" color="error" title="Could not load integration settings" />
@@ -64,6 +65,7 @@ watch(open, (value) => { if (!value) { state.realtimeToken = ''; state.openroute
               <UAlert v-if="error" color="error" :title="error" /><UAlert v-if="feedback" color="success" :title="feedback" />
               <UButton v-if="owner" type="submit" :loading="save.isPending.value">Save Changes</UButton>
             </UForm>
+            <div class="telegram-integration"><TelegramIntegration /></div>
           </template>
           <div v-show="tab === 'storage'"><StorageSettings v-if="owner" /></div>
           <template v-if="tab === 'database'">

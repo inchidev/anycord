@@ -56,3 +56,21 @@ export const attachments = sqliteTable('attachments', {
   status: text('status').notNull().default('pending'), createdAt: integer('created_at').notNull(),
 }, t => [index('attachments_message').on(t.messageId), index('attachments_pending').on(t.createdAt)])
 export const liveTickets = sqliteTable('live_tickets', { hash: text('hash').primaryKey(), authorization: text('authorization').notNull(), origin: text('origin').notNull(), workspaceId: text('workspace_id').notNull(), expiresAt: integer('expires_at').notNull() })
+
+export const telegramPreferences = sqliteTable('telegram_preferences', {
+  userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  preview: integer('preview', { mode: 'boolean' }).notNull().default(false),
+  messagingAllowed: integer('messaging_allowed', { mode: 'boolean' }).notNull().default(false),
+  mutedChannelIds: text('muted_channel_ids').notNull().default('[]'),
+})
+export const threadFollowers = sqliteTable('thread_followers', {
+  threadId: text('thread_id').notNull().references(() => threads.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, t => [primaryKey({ columns: [t.threadId, t.userId] })])
+export const telegramOutbox = sqliteTable('telegram_outbox', {
+  id: text('id').primaryKey(), userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  messageId: text('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  attempts: integer('attempts').notNull().default(0), dueAt: integer('due_at').notNull(),
+  status: text('status').notNull().default('pending'),
+}, t => [index('telegram_outbox_due').on(t.status, t.dueAt)])

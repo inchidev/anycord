@@ -104,14 +104,15 @@ try {
   assert.equal(runtime.data.engine, process.env.TEST_ENGINE || 'celld'); assert.equal(runtime.data.apiVersion, 1)
   const legacy = Array.from({ length: 100 }, (_, index) => ({ id: crypto.randomUUID(), name: 'archive', text: `Preserved message ${index} old-search-marker-${index}`, sentAt: Date.now() - 200_000 + index * 100 }))
   legacy[0].id = `archive-${'x'.repeat(110)}` // Opaque migrated IDs must not be truncated by the focus query.
-  const firstName = JSON.parse(await readFile('drizzle/meta/_journal.json', 'utf8')).entries[0].tag
+  const migrationEntries = JSON.parse(await readFile('drizzle/meta/_journal.json', 'utf8')).entries
+  const firstName = migrationEntries[0].tag
   const first = await api('/api/_migrate', { method: 'POST', headers: { 'X-Migration-Token': migrationToken }, body: { target: firstName, legacy } })
   assert.equal(first.data.applied.length, 1); assert.equal(first.data.messageCount, 101)
   const second = await api('/api/_migrate', { method: 'POST', headers: { 'X-Migration-Token': migrationToken }, body: {} })
-  assert.equal(second.data.applied.length, 6); assert.equal(second.data.messageCount, 101)
+  assert.equal(second.data.applied.length, migrationEntries.length - 1); assert.equal(second.data.messageCount, 101)
   const third = await api('/api/_migrate', { method: 'POST', headers: { 'X-Migration-Token': migrationToken }, body: {} })
   assert.equal(third.data.applied.length, 0)
-  console.log('PASS: Drizzle migrations through 0006 preserve existing rows; reapply is idempotent.')
+  console.log(`PASS: ${migrationEntries.length} Drizzle migrations preserve existing rows; reapply is idempotent.`)
   await api('/api/_migrate', { method: 'POST', body: {}, expected: 403 })
   await api('/api/bootstrap', { expected: 401 })
   const status = await api('/api/auth/status'); assert.equal(status.data.initialized, false)
@@ -279,7 +280,7 @@ try {
   const configured = await api('/api/integrations', { cookie: alice.cookie, method: 'PUT', body: { realtimeAccountId: 'a'.repeat(32), realtimeAppId: 'test-app', realtimePreset: 'group_call_participant', realtimeToken: 'fake-test-token-never-send', openrouterKey: 'fake-test-ai-key-never-send' } })
   assert(configured.data.realtimeConfigured); assert(configured.data.aiConfigured)
   assert(!JSON.stringify(configured.data).includes('fake-test'))
-  const database = await api('/api/database', { cookie: alice.cookie }); assert.equal(database.data.migrations.length, 7)
+  const database = await api('/api/database', { cookie: alice.cookie }); assert.equal(database.data.migrations.length, migrationEntries.length)
   await api('/api/database', { cookie: bob.cookie, expected: 403 })
   await api('/api/integrations/test', { cookie: alice.cookie, method: 'POST' })
   const beforeUnauthorized = providerCalls.length
