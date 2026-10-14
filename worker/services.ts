@@ -64,3 +64,17 @@ export async function askAI(env: Env, channelId: string, userId: string) {
   const result = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string().min(1) }) })).min(1) }).parse(await response.json())
   return result.choices[0]!.message.content.slice(0, 4000)
 }
+
+export async function testAI(env: Env) {
+  const encrypted = await getSetting(env, 'openrouterKey')
+  if (!encrypted) throw new HttpError(409, 'Save an OpenRouter API key before testing the connection')
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${await decrypt(encrypted, env.APP_SECRET)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: await getSetting(env, 'aiModel') || 'openai/gpt-4.1-mini', max_tokens: 32, messages: [{ role: 'user', content: 'Reply with OK.' }] }),
+    signal: AbortSignal.timeout(45_000),
+  })
+  if (!response.ok) throw new HttpError(502, `OpenRouter rejected the test (${response.status}). Check your saved key, model and credit balance.`)
+  const result = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string().min(1) }) })).min(1) }).safeParse(await response.json().catch(() => null))
+  if (!result.success) throw new HttpError(502, 'The model returned no text. Check its output limits or try another model.')
+}

@@ -4,7 +4,7 @@
 
 The source repository is [inchidev/anycord](https://github.com/inchidev/anycord). GitHub Actions runs `npm ci` and `npm run verify` on pushes and pull requests, using Node.js 22. This workflow checks and builds the application; it does not deploy it.
 
-Existing production releases at `https://anycord.inchi.dev` were published directly with Wrangler. Automatic deployment from Git is **pending**: Cloudflare's repository-connection API rejected the initial connection with error `8000008`, because its GitHub integration has not authorized this repository. A successful GitHub check alone is not evidence of a production deployment.
+Existing production releases at `https://anycord.inchi.dev` were published directly with Wrangler. Cloudflare Workers Builds is connected to `inchidev/anycord`, with the production commands below. The first push deployment must pass its build, deploy and live verification before the pipeline is considered proven. A successful GitHub check alone is not evidence of a production deployment.
 
 ## Connect Cloudflare Workers Builds
 

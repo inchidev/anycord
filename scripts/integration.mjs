@@ -30,6 +30,7 @@ let storageVars = ''
 for (const key of ['STORAGE_ENDPOINT','STORAGE_BUCKET','STORAGE_REGION','STORAGE_ACCESS_KEY_ID','STORAGE_SECRET_ACCESS_KEY']) if (process.env[key]) storageVars += `${key}=${JSON.stringify(process.env[key])}\n`
 if (storageVars) await writeFile(join(folder, '.dev.vars'), await readFile(join(folder, '.dev.vars'), 'utf8') + storageVars)
 const providerCalls = []
+let rejectAiTest = false, emptyAiTest = false
 const provider = createServer(async (request, response) => {
   let raw = ''; for await (const chunk of request) raw += chunk
   const body = raw ? JSON.parse(raw) : undefined
@@ -38,6 +39,12 @@ const provider = createServer(async (request, response) => {
   if (request.url === '/ai') {
     assert.equal(request.headers.authorization, 'Bearer fake-test-ai-key-never-send')
     assert(body.messages.length <= 13)
+    if (body.max_tokens === 32) {
+      assert.deepEqual(body.messages, [{role:'user',content:'Reply with OK.'}])
+      assert.equal(body.model,'openai/gpt-4.1-mini')
+      if (rejectAiTest) { response.statusCode=401; response.end(JSON.stringify({error:{message:'fake-test-ai-key-never-send'}}));return }
+      if (emptyAiTest) { response.end(JSON.stringify({choices:[]}));return }
+    }
     response.end(JSON.stringify({ choices: [{ message: { content: 'AI response from the local provider double' } }] })); return
   }
   assert.equal(request.headers.authorization, 'Bearer fake-test-token-never-send')
@@ -254,12 +261,26 @@ try {
   await api('/api/channels/general', { cookie: alice.cookie, method: 'PATCH', body: { name: originalChannel.name, topic: originalChannel.topic } })
   console.log('PASS: server name/icon text and channel name/topic updates, validation, immutable channel kind, non-owner rejection, private-server isolation, and bootstrap consistency.')
   await api('/api/integrations', { cookie: bob.cookie, method: 'PUT', body: {}, expected: 403 })
+  await api('/api/integrations/ai/test', { cookie: alice.cookie, method: 'POST', expected: 409 })
   const configured = await api('/api/integrations', { cookie: alice.cookie, method: 'PUT', body: { realtimeAccountId: 'a'.repeat(32), realtimeAppId: 'test-app', realtimePreset: 'group_call_participant', realtimeToken: 'fake-test-token-never-send', openrouterKey: 'fake-test-ai-key-never-send' } })
   assert(configured.data.realtimeConfigured); assert(configured.data.aiConfigured)
   assert(!JSON.stringify(configured.data).includes('fake-test'))
   const database = await api('/api/database', { cookie: alice.cookie }); assert.equal(database.data.migrations.length, 6)
   await api('/api/database', { cookie: bob.cookie, expected: 403 })
   await api('/api/integrations/test', { cookie: alice.cookie, method: 'POST' })
+  const beforeUnauthorized = providerCalls.length
+  await api('/api/integrations/ai/test', { cookie: bob.cookie, method:'POST',expected:403 })
+  assert.equal(providerCalls.length,beforeUnauthorized)
+  const beforeTest = (await api('/api/channels/general/messages',{cookie:alice.cookie})).data.length
+  await api('/api/integrations/ai/test', { cookie:alice.cookie,method:'POST' })
+  assert.equal((await api('/api/channels/general/messages',{cookie:alice.cookie})).data.length,beforeTest)
+  rejectAiTest=true
+  const rejected = await api('/api/integrations/ai/test',{cookie:alice.cookie,method:'POST',expected:502})
+  assert(!JSON.stringify(rejected).includes('fake-test-ai-key-never-send'))
+  rejectAiTest=false;emptyAiTest=true
+  await api('/api/integrations/ai/test',{cookie:alice.cookie,method:'POST',expected:502})
+  emptyAiTest=false
+  console.log('PASS: owner-only AI connection test, saved key/model, synthetic prompt without chat history, no chat writes, and sanitized provider/empty-response failures.')
   const calls = await Promise.all([alice, bob].map((account) => api('/api/channels/hangout/huddle', { cookie: account.cookie, method: 'POST' })))
   assert.equal(calls[0].data.meetingId, calls[1].data.meetingId)
   assert.equal(calls[0].data.authToken, 'mock-participant-token')

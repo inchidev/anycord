@@ -52,6 +52,7 @@ export const endpoints = {
   huddleLeave: endpoint('DELETE', '/api/channels/:channelId/huddle/:participantId', none, ok),
   integrations: endpoint('GET', '/api/integrations', none, integrationsSchema),
   integrationsUpdate: endpoint('PUT', '/api/integrations', integrationSchema, integrationsSchema),
+  integrationsAiTest: endpoint('POST', '/api/integrations/ai/test', none, ok),
   integrationsTest: endpoint('POST', '/api/integrations/test', none, ok.extend({ presets: z.array(z.string()) })),
   storage: endpoint('GET', '/api/storage', none, storageStatusSchema),
   storageUpdate: endpoint('PUT', '/api/storage', storageInputSchema, storageStatusSchema),

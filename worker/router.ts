@@ -11,7 +11,7 @@ import { decrypt, digest, encrypt, equalSecret, HttpError, readBody } from './se
 import { applyMigrations, seedDatabase } from './migrate'
 import migrations from './migrations.json'
 import { attachmentContent, cleanupAttachments, createAttachment, deleteAttachment, downloadAttachment, storageStatus, testStorage, updateStorage, uploadAttachment } from './storage'
-import { askAI, integrationStatus, leaveHuddle, realtimeRequest } from './services'
+import { askAI, testAI, integrationStatus, leaveHuddle, realtimeRequest } from './services'
 
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
 const hub = (env: Env, workspaceId: string) => env.HUBS.getByName(workspaceId)
@@ -319,6 +319,11 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     for (const key of ['realtimeToken', 'openrouterKey'] as const) if (input[key] !== undefined) await setSetting(env, key, input[key] ? await encrypt(input[key], env.APP_SECRET) : '')
     for (const key of ['realtimeAccountId', 'realtimeAppId', 'realtimePreset', 'aiModel'] as const) await setSetting(env, key, input[key])
     return json(await integrationStatus(env))
+  }
+  if (endpoint?.name === 'integrationsAiTest') {
+    if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can test credentials')
+    await testAI(env)
+    return json({ ok: true })
   }
   if (endpoint?.name === 'integrationsTest') {
     if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can test credentials')
