@@ -3,7 +3,7 @@ import { safeNext } from '../../shared/navigation'
 
 declare global { interface Window { Telegram?: { WebApp?: { initData?: string } } } }
 export function telegramInitData() {
-  return window.Telegram?.WebApp?.initData || new URLSearchParams(location.hash.slice(1)).get('tgWebAppData') || ''
+  return window.Telegram?.WebApp?.initData || useNuxtApp().$telegramLaunchData || ''
 }
 export async function miniAppSignIn(link = false) {
   if (getApiTarget().origin) throw new Error('Open this installation directly in Telegram to link your account.')

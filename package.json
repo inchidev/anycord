@@ -25,7 +25,8 @@
     "release:package": "node scripts/package-release.mjs",
     "test:pwa": "node scripts/test-pwa.mjs",
     "pretest:telegram": "node scripts/write-build-info.mjs",
-    "test:telegram": "node scripts/test-telegram.mjs"
+    "test:telegram": "node scripts/test-telegram.mjs",
+    "test:telegram-launch": "node scripts/test-telegram-launch.mjs"
   },
   "dependencies": {
     "@cloudflare/realtimekit": "2.0.3",
@@ -50,6 +51,7 @@
     "drizzle-kit": "0.31.11",
     "esbuild": "0.27.7",
     "miniflare": "5.20261012.0-beta",
+    "playwright": "1.62.1",
     "typescript": "^5.9.3",
     "vue-tsc": "3.3.13",
     "wrangler": "4.151.0",
