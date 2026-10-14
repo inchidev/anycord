@@ -69,6 +69,11 @@ if (operation === 'destroy') {
   }
   const db = await database()
   if (db) await cloudflare(`${prefix}/d1/database/${db.uuid}`, { method: 'DELETE' })
+  const pull = await github(`/repos/${repository}/pulls/${pr}`)
+  await github(`/repos/${repository}/check-runs`, { method: 'POST', body: {
+    name: 'PR preview', head_sha: pull.head.sha, status: 'completed', conclusion: 'neutral',
+    output: { title: `Preview PR #${pr} removed`, summary: 'The isolated Worker, Durable Objects, D1 database and R2 bucket have been removed.' },
+  } })
   await appendFile(process.env.GITHUB_STEP_SUMMARY, `Removed preview PR #${pr}: Worker, Durable Objects, D1 and private R2 bucket.\n`)
   console.log(`Removed preview PR #${pr}`)
 } else {
@@ -128,5 +133,9 @@ if (operation === 'destroy') {
   await checkAuthorization()
   await appendFile(process.env.GITHUB_OUTPUT, `url=${origin}\n`)
   await appendFile(process.env.GITHUB_STEP_SUMMARY, `Preview PR #${pr}: [Open preview](${origin})\n\nSource: \`${expected.commit}\`\n\nIsolated Worker/D1/R2/DO; schema \`${expected.schema}\`. First-account setup code is derived from the private preview seed; it is never published in logs. See docs/previews.md.\n`)
+  await github(`/repos/${repository}/check-runs`, { method: 'POST', body: {
+    name: 'PR preview', head_sha: expected.commit, status: 'completed', conclusion: 'success', details_url: origin,
+    output: { title: `Preview PR #${pr} ready`, summary: `[Open preview](${origin})\n\nTested source: \`${expected.commit}\`. Exact API/client identity, migration schema \`${expected.schema}\` and PWA routes verified. Separate Worker/D1/R2/DO; no production bindings. Real provider acceptance remains a separate test.` },
+  } })
   console.log(`PASS preview PR #${pr} at ${expected.commit}: ${origin}`)
 }
