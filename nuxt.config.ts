@@ -15,7 +15,7 @@ export default defineNuxtConfig({
       link: [{ rel: 'icon', href: '/favicon.png', type: 'image/png' }],
     },
   },
-  nitro: { prerender: { routes: ['/', '/login', '/servers'] } },
+  nitro: { preset: 'static', prerender: { routes: ['/', '/login', '/servers'] } },
   typescript: { strict: true },
   vue: { compilerOptions: { isCustomElement: (tag) => tag.startsWith('rtk-') } },
 })
