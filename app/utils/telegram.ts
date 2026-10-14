@@ -1,7 +1,7 @@
 import { getApiTarget } from './connection'
 import { safeNext } from '../../shared/navigation'
 
-declare global { interface Window { Telegram?: { WebApp?: { initData?: string; ready?: () => void } } } }
+declare global { interface Window { Telegram?: { WebApp?: { initData?: string; ready?: () => void } }; TelegramWebviewProxy?: { postEvent: (event: string, data: string) => void } } }
 export function telegramInitData() {
   return window.Telegram?.WebApp?.initData || useNuxtApp().$telegramLaunchData || ''
 }

@@ -36,12 +36,13 @@ try {
     await page.addInitScript(() => {
       // Model a Telegram WebView without service worker support.
       delete Navigator.prototype.serviceWorker
+      sessionStorage.setItem('__telegram__initParams', JSON.stringify({ tgWebAppData: 'legacy-sensitive-launch' }))
       window.loginFormSeen = false
       new MutationObserver(() => { if (document.querySelector('.auth-card')) window.loginFormSeen = true }).observe(document, { childList: true, subtree: true })
     })
     await page.route('https://telegram.org/js/telegram-web-app.js', route => route.fulfill({ contentType: 'text/javascript', body: `
       // Behave like the provider SDK: persist UI params and publish live CSS insets.
-      sessionStorage.setItem('__telegram__initParams', JSON.stringify(Object.fromEntries(new URLSearchParams(location.hash.slice(1)))));
+      sessionStorage.setItem('__telegram__initParams', JSON.stringify({ ...JSON.parse(sessionStorage.getItem('__telegram__initParams') || '{}'), ...Object.fromEntries(new URLSearchParams(location.hash.slice(1))) }));
       window.Telegram = { WebApp: { initData: '', ready() {} } };
       window.setTelegramInsets = (top, bottom, left = 0, right = 0) => {
         const root = document.documentElement;
@@ -79,12 +80,18 @@ try {
     assert(!page.url().includes('tgWebAppData'), `${entry}: signed launch data must not enter navigation URLs`)
     assert.equal(await page.evaluate(() => Object.keys(localStorage).some(key => (localStorage.getItem(key) || '').includes('synthetic-query'))), false)
     assert.equal(await page.evaluate(() => Object.keys(sessionStorage).some(key => (sessionStorage.getItem(key) || '').includes('synthetic-query'))), false)
+    assert.equal(await page.evaluate(() => Object.keys(sessionStorage).some(key => (sessionStorage.getItem(key) || '').includes('legacy-sensitive-launch'))), false)
     if (!entry.includes('next=')) {
       assert((await page.locator('.picker-nav').boundingBox()).y >= 100, 'directory chrome must clear system (44px) + Telegram (56px) controls')
       await page.evaluate(() => window.setTelegramInsets(20, 10, 12, 18))
       assert.equal((await page.locator('.picker-nav').boundingBox()).y, 64, 'live SDK inset changes must update the layout')
       const nav = await page.locator('.picker-nav').boundingBox()
       assert(nav.x >= 12 && nav.x + nav.width <= 372, 'side insets must keep controls clear in landscape')
+      await page.reload({ waitUntil: 'networkidle' })
+      await page.locator('.server-choice').first().waitFor()
+      assert.equal(attempts.length, 1, 'reload must reuse the session without persisting/replaying signed launch data')
+      assert((await page.locator('.picker-nav').boundingBox()).y >= 100, 'safe areas must survive reloads after the signed fragment is removed')
+      assert.equal(await page.evaluate(() => window.loginFormSeen), false, 'reload must not flash a login form')
     } else {
       const bounds = await page.locator('.chat-header').boundingBox()
       assert(bounds.y >= 100, 'chat header must clear Telegram UI')

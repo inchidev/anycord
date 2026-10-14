@@ -6,8 +6,14 @@ export default defineNuxtPlugin({
   async setup() {
     const params = new URLSearchParams(window.location.hash.slice(1))
     const initData = window.Telegram?.WebApp?.initData || params.get('tgWebAppData') || ''
-    if (initData) {
+    // Reloads (including a PWA update) have no signed fragment. Remember only
+    // the UI context so those pages still receive Telegram's live safe areas.
+    let miniApp = !!initData || !!window.Telegram?.WebApp || !!window.TelegramWebviewProxy
+    try { miniApp ||= sessionStorage.getItem('anycord-telegram-ui') === '1' } catch {}
+    if (window.parent !== window && document.referrer.startsWith('https://web.telegram.org/')) miniApp = true
+    if (miniApp) {
       document.documentElement.dataset.telegram = ''
+      try { sessionStorage.setItem('anycord-telegram-ui', '1') } catch {}
       // The official SDK persists its launch parameters. Give it only UI
       // metadata: signed identity stays in this app instance, never storage.
       const uiParams = new URLSearchParams()
@@ -15,11 +21,16 @@ export default defineNuxtPlugin({
         const value = params.get(key)
         if (value) uiParams.set(key, value)
       }
-      const path = ['/', '/main'].includes(location.pathname) || (location.pathname === '/login' && !location.search) ? '/servers' : location.pathname
-      window.history.replaceState(window.history.state, '', path + location.search + (uiParams.size ? '#' + uiParams : ''))
+      if (initData) {
+        const path = ['/', '/main'].includes(location.pathname) || (location.pathname === '/login' && !location.search) ? '/servers' : location.pathname
+        window.history.replaceState(window.history.state, '', path + location.search + (uiParams.size ? '#' + uiParams : ''))
+      }
       if (!window.Telegram?.WebApp) {
         // Discard legacy SDK identity persistence before it merges stored params.
-        try { sessionStorage.removeItem('__telegram__initParams') } catch {}
+        try {
+          const stored = JSON.parse(sessionStorage.getItem('__telegram__initParams') || '{}')
+          if (stored?.tgWebAppData) sessionStorage.removeItem('__telegram__initParams')
+        } catch {}
         const script = document.createElement('script')
         script.src = 'https://telegram.org/js/telegram-web-app.js'
         const loaded = new Promise<void>(resolve => {
