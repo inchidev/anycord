@@ -13,5 +13,5 @@ for (let i = 0; i < 20; i++) {
   await delay(2000)
 }
 assert(healthy, 'Deployment health/schema check failed. Configure the MIGRATION_TOKEN build secret for application migrations.')
-for (const path of ['/', '/login', '/servers', '/main/general', '/brand/anycord-symbol.png']) assert((await fetch(base + path)).ok, path)
+for (const path of ['/', '/login', '/servers', '/invite', '/recover', '/main/general', '/brand/anycord-symbol.png']) assert((await fetch(base + path)).ok, path)
 console.log('PASS: public deployment health, schema, client routes and brand asset.')

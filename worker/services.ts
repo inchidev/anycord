@@ -13,7 +13,7 @@ export async function integrationStatus(env: Env): Promise<Integrations> {
 }
 export async function realtimeRequest(env: Env, path: string, method = 'GET', body?: unknown) {
   const config = await integrationStatus(env)
-  if (!config.realtimeConfigured) throw new HttpError(409, 'Set up Cloudflare RealtimeKit in Server Settings → Integrations first')
+  if (!config.realtimeConfigured) throw new HttpError(409, 'Ask the installation owner to configure Cloudflare RealtimeKit in Installation Settings → Integrations')
   const key = await decrypt(await getSetting(env, 'realtimeToken'), env.APP_SECRET)
   const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(config.realtimeAccountId)}/realtime/kit/${encodeURIComponent(config.realtimeAppId)}${path}`, {
     method, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -26,7 +26,7 @@ export async function realtimeRequest(env: Env, path: string, method = 'GET', bo
 export async function joinHuddle(env: Env, channelId: string, title: string, user: User) {
   const db = database(env)
   const config = await integrationStatus(env)
-  if (!config.realtimeConfigured) throw new HttpError(409, 'Set up Cloudflare RealtimeKit in Server Settings → Integrations first')
+  if (!config.realtimeConfigured) throw new HttpError(409, 'Ask the installation owner to configure Cloudflare RealtimeKit in Installation Settings → Integrations')
   let meeting = await db.select().from(huddles).where(eq(huddles.channelId, channelId)).get()
   if (!meeting) {
     const created = z.object({ id: z.uuid() }).parse(await realtimeRequest(env, '/meetings', 'POST', {
@@ -50,7 +50,7 @@ export async function leaveHuddle(env: Env, channelId: string, participantId: st
 }
 export async function askAI(env: Env, channelId: string, userId: string) {
   const encrypted = await getSetting(env, 'openrouterKey')
-  if (!encrypted) throw new HttpError(409, 'Set up an OpenRouter API key in Server Settings → Integrations first')
+  if (!encrypted) throw new HttpError(409, 'Ask the installation owner to configure OpenRouter in Installation Settings → Integrations')
   const history = await getMessages(env, channelId, userId)
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
