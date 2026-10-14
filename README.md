@@ -28,7 +28,7 @@ An **installation** has its own address, accounts, database and file storage. A 
 
 `/` is the product landing; `/login` is sign-in; `/servers` chooses a community; `/<serverId>/<channelId>` opens chat. The first server has the opaque ID `main`; additional servers receive UUIDs. Display names can change independently of IDs.
 
-The initial `main` server accepts accounts registered on its installation. Other servers belong to their creator until people join through server-scoped invitations. Server owners create/revoke links, set expiration and usage limits, remove members, ban them and remove bans in Server Settings. Custom roles and channel permissions are the next milestone in the [roadmap](docs/roadmap.md). Remote installations have independent identities/history. One installation is active per client tab; federation, shared global login and aggregate background notifications are not implemented.
+Only the installation owner can create new servers. The initial `main` server accepts accounts registered on its installation. Other servers belong to their creator until people join through server-scoped invitations. Server owners create/revoke links, set expiration and usage limits, remove members, ban them and remove bans in Server Settings. Custom roles and channel permissions are the next milestone in the [roadmap](docs/roadmap.md). Remote installations have independent identities/history. One installation is active per client tab; federation, shared global login and aggregate background notifications are not implemented.
 
 ## Resources and isolation
 

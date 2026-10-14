@@ -2,6 +2,7 @@
 
 ## Current milestone
 
+- Only the installation owner can create new servers. Community ownership alone does not grant this installation-level permission.
 - Server-scoped invite links with expiration, usage limits and owner revocation.
 - Username/password registration with client-side password confirmation.
 - Eight recovery keys, generated after verifying the current password. Only hashes are stored. A successful reset preserves the account and memberships, changes the password, revokes all prior sessions and invalidates the entire old key set. Generate a fresh set after signing in again.

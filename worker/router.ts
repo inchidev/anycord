@@ -202,6 +202,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     return json({ user, workspaces: spaces, channels, members })
   }
   if (endpoint?.name === 'workspaceCreate') {
+    if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can create servers')
     const input = workspaceSchema.parse(await readBody(request))
     const id = crypto.randomUUID()
     await db.batch([

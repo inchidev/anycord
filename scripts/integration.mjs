@@ -122,6 +122,10 @@ try {
   assert.equal(signedIn.data.user.id, alice.data.user.id); assert(signedIn.cookie)
   await api('/api/auth/sign-up/email', { method: 'POST', body: { email: 'bypass@example.com', name: 'bypass', password: 'correct-horse-battery' }, expected: 404 })
   assert.equal(alice.data.user.role, 'owner'); assert.equal(bob.data.user.role, 'member')
+  await api('/api/workspaces', { method: 'POST', body: { name: 'Anonymous server' }, expected: 401 })
+  const serversBeforeDeniedCreate = (await api('/api/bootstrap', { cookie: bob.cookie })).data.workspaces
+  await api('/api/workspaces', { cookie: bob.cookie, method: 'POST', body: { name: 'Denied server', role: 'owner' }, expected: 403 })
+  assert.deepEqual((await api('/api/bootstrap', { cookie: bob.cookie })).data.workspaces, serversBeforeDeniedCreate)
   await api('/api/auth/login', { method: 'POST', body: { name: 'alice', password: 'wrong-password' }, expected: 401 })
   await api('/api/bootstrap', { cookie: alice.cookie, headers: { Origin: 'https://example.com' }, expected: 403 })
   const html = await (await fetch(base)).text(); assert.match(html, /Anycord/); assert.match(html, /_nuxt/)
@@ -188,6 +192,7 @@ try {
   console.log('PASS: replies, Unicode emoji, quoted text, threads/search/focus, context isolation, conflicting retries, and deleted-original tombstones.')
   await api('/api/workspaces/main/channels', { cookie: bob.cookie, method: 'POST', body: { name: 'not-allowed' }, expected: 403 })
   const space = await api('/api/workspaces', { cookie: alice.cookie, method: 'POST', body: { name: 'Private server' }, expected: 201 })
+  console.log('PASS: only the installation owner creates servers; anonymous and ordinary-member requests, including a spoofed owner role, are rejected.')
   await api(`/api/bootstrap?workspace=${space.data.id}`, { cookie: bob.cookie, expected: 403 })
   const privateData = await api(`/api/bootstrap?workspace=${space.data.id}`, { cookie: alice.cookie })
   const privateChannel = privateData.data.channels[0].id
@@ -299,7 +304,9 @@ try {
   await api(`/api/channels/hangout/huddle/${calls[1].data.participantId}`, { cookie: bob.cookie, method: 'DELETE' })
   await api('/api/channels/general/ai', { cookie: alice.cookie, method: 'POST' })
   console.log('PASS: server isolation, owner-only settings, masked secrets, RealtimeKit meeting/participant lifecycle, credential decryption, and AI API contract using a local provider double. No live provider calls.')
-  const organizer = await api('/api/auth/register', { method: 'POST', body: { name: 'organizer', password: 'correct-horse-battery' }, expected: 201 })
+  const ordinaryOrganizer = await api('/api/auth/register', { method: 'POST', body: { name: 'organizer', password: 'correct-horse-battery' }, expected: 201 })
+  await api('/api/workspaces', { cookie: ordinaryOrganizer.cookie, method: 'POST', body: { name: 'Denied organizer server' }, expected: 403 })
+  const organizer = alice
   const charlie = await api('/api/auth/register', { method: 'POST', body: { name: 'charlie', password: 'correct-horse-battery' }, expected: 201 })
   const dana = await api('/api/auth/register', { method: 'POST', body: { name: 'dana', password: 'correct-horse-battery' }, expected: 201 })
   const community = (await api('/api/workspaces', { cookie: organizer.cookie, method: 'POST', body: { name: 'Invitation-only server' }, expected: 201 })).data.id

@@ -13,7 +13,7 @@ Decision: 2026-10-14. Serve the generated Nuxt client and the application API fr
 | authRegister / authLogin | POST `/api/auth/register`, `/api/auth/login` | Username/password; returns application profile and sets Better Auth cookie |
 | authLogout | POST `/api/auth/logout` | Revokes session, clears cookie, closes that session's live connections; `{ success: true }` |
 | bootstrap | GET `/api/bootstrap?workspace=…` | Accessible servers, selected server's channels and members |
-| workspaceCreate | POST `/api/workspaces` | Create a server, owner membership and initial text channel atomically |
+| workspaceCreate | POST `/api/workspaces` | Installation-owner-only; create a server, owner membership and initial text channel atomically |
 | channelCreate | POST `/api/workspaces/:workspaceId/channels` | Server-owner-only channel creation |
 | messages | GET `/api/channels/:channelId/messages?focus=…` | Latest 100 messages or a neighborhood around a search result, sorted chronologically |
 | messageCreate | POST `/api/channels/:channelId/messages` | Persist a client-generated UUID and text; acknowledge a retry without duplicating its notification |
