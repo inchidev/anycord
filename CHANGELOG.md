@@ -2,13 +2,23 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-15
+
 - Add installation-wide Authentication settings, Telegram OIDC and Mini App sign-in, explicit account linking and password fallback for Telegram-created accounts.
 - Add encrypted bot/OIDC configuration and setup instructions under Installation Settings → Integrations; keep server invitations and recovery keys independent.
 - Add opt-in Telegram notifications for mentions, replies and followed threads, channel muting, verified bot consent and bounded delivery retries.
 - Respect Telegram's live device/content safe areas and viewport in chat, server selection and dialogs. Open the Mini App on a compact server directory after session resolution, without briefly showing the login form.
 - Use verified Telegram names and avatars across the server picker, profiles, members and messages without displaying Telegram IDs; preserve internal handles and existing password-account names. Match the Mini App safe-area and native top-bar colours to the active header.
+- Add manually triggered PR previews restricted to GitHub Maintain/Admin, with isolated Worker, D1, R2 and Durable Object resources (#17, #19).
 - Add migration `0007_cultured_toad_men` for Telegram preferences/outbox, thread follows and unique Telegram account bindings. API v1 remains compatible; existing installations keep password login and open registration by default.
-- Validate browser OIDC and native Telegram Mini App behavior with a dedicated bot before deployment. The local Telegram provider tests do not establish live Telegram/device acceptance.
+
+### Upgrade
+
+Back up the installation database, attachments and encryption/signing secrets before upgrading. Preserve existing resource bindings and secrets, apply migration `0007_cultured_toad_men` through the authenticated `/api/_migrate` endpoint, then verify client/Worker version and schema. Password login remains available by default; owners configure Telegram credentials and login methods explicitly. Publishing this release does not automatically update production or tenant installations.
+
+### Validation and limits
+
+The full verification suite and generated-client browser regression tests passed. Telegram Web launch, profile photos, session persistence and header colours were verified on the isolated preview; the user accepted the Mini App flow and visual changes on iOS. Browser OIDC, Android and live notification delivery still need acceptance with a dedicated test bot. Local provider tests cover signature/claim failures, profile matching, account linking and notification authorization/retries without proving live delivery.
 
 ## 0.3.0 — 2026-10-15
 
