@@ -2,9 +2,9 @@
 const api = apiFor()
 import { credentialsSchema, registrationFormSchema } from '../../shared/contracts'
 import { apiFor } from '../utils/api'
-import { miniAppSignIn, telegramInitData, telegramSignIn } from '../utils/telegram'
+import { telegramSignIn } from '../utils/telegram'
 import type { EndpointOutput } from '../../shared/api'
-const props = defineProps<{ initialized: boolean; setupRequired?: boolean; methods?: EndpointOutput<'authStatus'>['methods'] }>()
+const props = defineProps<{ initialized: boolean; setupRequired?: boolean; methods?: EndpointOutput<'authStatus'>['methods']; telegramError?: string }>()
 const emit = defineEmits<{ authenticated: [] }>()
 const { $connections: connections } = useNuxtApp()
 const remote = computed(() => !!connections.current.value)
@@ -13,17 +13,11 @@ const register = computed({ get: () => !remote.value && (!props.initialized || r
 const state = reactive({ name: '', password: '', confirmPassword: '', setupCode: new URLSearchParams(location.hash.slice(1)).get('setup') || '' })
 onMounted(() => { if (location.hash.startsWith('#setup=')) void router.replace({ query: route.query, hash: '' }) })
 const pending = ref(false)
-const error = ref('')
+const error = ref(props.telegramError || '')
 const methods = computed(() => props.methods || { passwordLogin: true, registration: true, telegramLogin: false, miniAppLogin: false })
 const passwordAvailable = computed(() => !props.initialized || (methods.value.passwordLogin && (!register.value || methods.value.registration)))
-onMounted(async () => {
+onMounted(() => {
   if (route.query.telegram === 'error') error.value = 'Telegram login was cancelled or failed. Try again or use another login method.'
-  if (!remote.value && props.initialized && methods.value.miniAppLogin && telegramInitData()) {
-    pending.value = true
-    try { await miniAppSignIn(); if (!disposed) emit('authenticated') }
-    catch (cause) { error.value = apiError(cause) }
-    finally { pending.value = false }
-  }
 })
 async function telegramLogin() {
   pending.value = true; error.value = ''

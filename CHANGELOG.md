@@ -5,6 +5,7 @@
 - Add installation-wide Authentication settings, Telegram OIDC and Mini App sign-in, explicit account linking and password fallback for Telegram-created accounts.
 - Add encrypted bot/OIDC configuration and setup instructions under Installation Settings → Integrations; keep server invitations and recovery keys independent.
 - Add opt-in Telegram notifications for mentions, replies and followed threads, channel muting, verified bot consent and bounded delivery retries.
+- Respect Telegram's live device/content safe areas and viewport in chat, server selection and dialogs. Open the Mini App on a compact server directory after session resolution, without briefly showing the login form.
 - Add migration `0007_cultured_toad_men` for Telegram preferences/outbox, thread follows and unique Telegram account bindings. API v1 remains compatible; existing installations keep password login and open registration by default.
 - Validate browser OIDC and native Telegram Mini App behavior with a dedicated bot before deployment. The local Telegram provider tests do not establish live Telegram/device acceptance.
 
