@@ -8,8 +8,8 @@ import { getApiTarget } from '../utils/connection'
 import { prepareAttempt, type MessageAttempt } from '../../shared/drafts'
 import { apiFor, uploadFor } from '../utils/api'
 import { receiveMessage } from '../data/messages'
-const props = defineProps<{ userId: string; workspaceId: string; channelId: string; channelName: string; threadId?: string; replyTo?: Message | null; typing?: string; ai?: boolean }>()
-const emit = defineEmits<{ clearReply: []; sent: []; typing: [event: { type: 'typing'; channelId: string; threadId?: string }]; askAi: []; layout: [metrics: { bottom: number; height: number }] }>()
+const props = defineProps<{ userId: string; workspaceId: string; channelId: string; channelName: string; threadId?: string; replyTo?: Message | null; typing?: string; ai?: boolean; huddle?: boolean; huddlePending?: boolean }>()
+const emit = defineEmits<{ clearReply: []; sent: []; typing: [event: { type: 'typing'; channelId: string; threadId?: string }]; askAi: []; startHuddle: []; layout: [metrics: { bottom: number; height: number }] }>()
 const queryClient = useQueryClient(), toast = useToast()
 const draftScope = getApiTarget().origin
 const { $draftStore } = useNuxtApp()
@@ -118,10 +118,11 @@ defineExpose({ focus, quote, measure })
     <div v-if="files.length" class="attachment-drafts"><div v-for="file in files" :key="file.id"><UIcon name="i-lucide-file" /><span>{{ file.name }}</span><UButton icon="i-lucide-x" variant="ghost" color="neutral" :aria-label="`Remove ${file.name}`" :disabled="isPending" @click="removeFile(file.id)" /></div></div>
     <p v-if="uploading" class="attachment-loading" role="status">Uploading file…</p><p v-if="uploadError" class="send-error" role="alert">{{ uploadError }}</p>
     <div class="composer-box">
-      <UFileUpload :key="pickerRevision" :multiple="true" :disabled="uploading || isPending || !channelId" class="attachment-picker" @update:model-value="addFiles"><template #default="{ open }"><UButton icon="i-lucide-circle-plus" color="neutral" variant="ghost" aria-label="Attach files" :disabled="uploading || isPending || !channelId" @click="open()" /></template></UFileUpload>
+      <UFileUpload :key="pickerRevision" :multiple="true" :disabled="uploading || isPending || !channelId" class="attachment-picker" @update:model-value="addFiles"><template #default="{ open }"><UButton :icon="isMobile ? 'i-lucide-plus' : 'i-lucide-circle-plus'" color="neutral" variant="ghost" aria-label="Attach files" :disabled="uploading || isPending || !channelId" @click="open()" /></template></UFileUpload>
       <UTextarea :disabled="!channelId" v-model="draft" :placeholder="threadId ? `Message ${channelName}` : `Message #${channelName}`" :rows="1" :maxrows="6" autoresize :maxlength="4000" variant="none" class="composer-input" aria-label="Message" @keydown="keydown" />
-      <UTooltip v-if="ai" text="Ask AI (shares the last 12 channel messages)"><UButton icon="i-lucide-bot" color="neutral" variant="ghost" aria-label="Ask AI about this conversation" @click="emit('askAi')" /></UTooltip>
+      <UTooltip v-if="ai" text="Ask AI (shares the last 12 channel messages)"><UButton class="composer-ai" icon="i-lucide-bot" color="neutral" variant="ghost" aria-label="Ask AI about this conversation" @click="emit('askAi')" /></UTooltip>
       <UPopover v-model:open="emojiOpen"><UButton icon="i-lucide-smile" color="neutral" variant="ghost" aria-label="Insert emoji" /><template #content><EmojiPicker @select="insertText" /></template></UPopover>
+      <UTooltip v-if="isMobile && huddle && !draft.trim() && !files.length" text="Start a voice huddle"><UButton icon="i-lucide-mic" color="neutral" variant="ghost" aria-label="Start a voice huddle" :loading="huddlePending" :disabled="!channelId" @click="emit('startHuddle')" /></UTooltip>
       <UButton v-if="draft.trim() || files.length" :disabled="uploading" type="submit" icon="i-lucide-send-horizontal" :loading="isPending" aria-label="Send message" />
     </div>
     <div class="composer-status" :class="{ 'has-status': send.isError.value || typing }" role="status"><span v-if="send.isError.value" class="send-error">{{ apiError(send.error.value) }} <button type="button" @click="submit">Retry</button></span><span v-else-if="typing">{{ typing }}…</span><span v-else>Shift + Enter for a new line</span></div>

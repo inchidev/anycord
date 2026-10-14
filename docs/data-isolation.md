@@ -2,6 +2,8 @@
 
 An installation is the deployment boundary: its own backend address, accounts, database and object store. Servers are communities inside that installation. Separate remote installations do not share these resources. The current Cloudflare adapter uses one D1 per installation, with application authorization between its servers. This document describes the current implementation, not a new database-per-server implementation.
 
+Decision (2026-10-15): keep the shared D1 for now. The existing `workspace_id` serves as the tenant/server key; an explicit tenant-scoped repository interface, stronger constraints and per-server database alternatives are tracked in [issue #1](https://github.com/inchidev/anycord/issues/1). This decision does not introduce a new `tenant_id` column or change existing records.
+
 ## How current reads and joins are scoped
 
 `worker/router.ts` checks `requireMembership(user.id, workspaceId)` before a server search. The query then joins messages to channels and applies `channels.workspace_id = workspaceId`; the search text is a bound parameter. Simplified equivalent SQL:

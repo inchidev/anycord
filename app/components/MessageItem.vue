@@ -3,7 +3,18 @@ import { useMediaQuery } from '@vueuse/core'
 import type { Message } from '../../shared/contracts'
 const props = withDefaults(defineProps<{ message: Message; mine: boolean; canDelete: boolean; allowThread?: boolean; replyable?: boolean }>(), { allowThread: true, replyable: true })
 const emit = defineEmits<{ edit: [text: string, done: (success: boolean) => void]; delete: [done: (success: boolean) => void]; react: [emoji: string]; reply: []; quote: []; thread: []; jump: [id: string]; copyLink: [] }>()
+const menuOpen = ref(false)
 const isMobile = useMediaQuery('(max-width: 700px)'), mobileReactions = ref(false)
+let holdTimer: ReturnType<typeof setTimeout> | undefined, holdStart: {x: number; y: number} | undefined
+function cancelHold() { clearTimeout(holdTimer); holdTimer = undefined; holdStart = undefined }
+function holdMessage(event: PointerEvent) {
+  if (!isMobile.value || event.pointerType !== 'touch' || (event.target as HTMLElement).closest('button, a, input, textarea')) return
+  cancelHold(); holdStart = {x:event.clientX,y:event.clientY}
+  holdTimer = setTimeout(() => { menuOpen.value = true; cancelHold() }, 450)
+}
+function moveHold(event: PointerEvent) { if (holdStart && Math.hypot(event.clientX-holdStart.x,event.clientY-holdStart.y)>8) cancelHold() }
+function contextMenu(event: MouseEvent) { if (isMobile.value) { event.preventDefault(); cancelHold(); menuOpen.value = true } }
+onBeforeUnmount(cancelHold)
 let movedMenuFocus = false
 function menuFocus(event: Event) { if (movedMenuFocus) { event.preventDefault(); movedMenuFocus = false } }
 const editing = ref(false)
@@ -38,11 +49,11 @@ function save() {
 </script>
 
 <template>
-  <article class="message-row" :class="{ 'has-reply': message.replyToId }" :id="`message-${message.id}`" tabindex="0">
+  <article class="message-row" :class="{ 'has-reply': message.replyToId }" :id="`message-${message.id}`" tabindex="0" @pointerdown="holdMessage" @pointermove="moveHold" @pointerup="cancelHold" @pointercancel="cancelHold" @pointerleave="cancelHold" @contextmenu="contextMenu">
     <span class="avatar" :style="{ backgroundColor: message.color }" aria-hidden="true">{{ message.author.slice(0, 2).toUpperCase() }}</span>
     <div class="message-content">
       <button v-if="message.replyToId" class="reply-preview" :disabled="!message.reply" @click="emit('jump', message.replyToId)"><UIcon name="i-lucide-corner-up-right" /><strong v-if="message.reply">{{ message.reply.author }}</strong><span>{{ message.reply?.text || 'Original message was deleted' }}</span></button>
-      <header><strong :style="{ color: message.bot ? '#f2f3f5' : message.color }">{{ message.author }}</strong><span v-if="message.bot" class="bot-label">APP</span><time :datetime="new Date(message.createdAt).toISOString()" :title="new Date(message.createdAt).toLocaleString()">{{ new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }}</time></header>
+      <header><strong :style="{ color: message.bot ? '#f2f3f5' : message.color }">{{ message.author }}</strong><span v-if="message.bot" class="bot-label">APP</span><time :datetime="new Date(message.createdAt).toISOString()" :title="new Date(message.createdAt).toLocaleString()">{{ isMobile ? new Date(message.createdAt).toLocaleString([], { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }}</time></header>
       <template v-if="editing">
         <UTextarea v-model="editText" :rows="2" autoresize class="w-full" aria-label="Edit message" :maxlength="4000" :disabled="editPending" />
         <p v-if="editError" role="alert" class="edit-error">{{ editError }}</p>
@@ -58,7 +69,7 @@ function save() {
     <div class="message-actions">
       <UPopover v-model:open="reactionOpen"><UButton icon="i-lucide-smile-plus" variant="ghost" color="neutral" aria-label="Add reaction" /><template #content><EmojiPicker @select="react" /></template></UPopover>
       <UButton v-if="replyable" icon="i-lucide-reply" variant="ghost" color="neutral" aria-label="Reply to message" @click="emit('reply')" />
-      <UDropdownMenu v-if="menu.length" :items="menu" :content="{ onCloseAutoFocus: menuFocus }"><UButton icon="i-lucide-ellipsis" variant="ghost" color="neutral" aria-label="Message actions" /></UDropdownMenu>
+      <UDropdownMenu v-if="menu.length" v-model:open="menuOpen" :items="menu" :content="{ onCloseAutoFocus: menuFocus }"><UButton icon="i-lucide-ellipsis" variant="ghost" color="neutral" aria-label="Message actions" /></UDropdownMenu>
     </div>
     <UModal v-model:open="mobileReactions" title="Add reaction" description="Choose an emoji for this message."><template #body><EmojiPicker @select="emit('react', $event); mobileReactions = false" /></template></UModal>
     <UModal v-model:open="deleting" title="Delete Message" description="This message will be permanently deleted."><template #body><p class="delete-preview">{{ message.text }}</p><UAlert v-if="deleteError" color="error" :title="deleteError" /></template><template #footer><UButton color="neutral" variant="ghost" :disabled="deletePending" @click="deleting = false">Cancel</UButton><UButton color="error" :loading="deletePending" @click="remove">Delete</UButton></template></UModal>
