@@ -4,16 +4,22 @@ import { APIError, createAuthEndpoint, getSessionFromCtx } from 'better-auth/api
 import { setSessionCookie } from 'better-auth/cookies'
 import { decodeJwt } from 'jose'
 import { authenticationConfig, initialized, type AuthenticationConfig } from './authentication'
+import { authAccounts } from '../db/auth-schema'
+import { drizzle } from 'drizzle-orm/d1'
+import { and, eq } from 'drizzle-orm'
+import { applyTelegramProfile } from './user-profiles'
+import { profileImage } from '../shared/profile'
 
 const telegramIdSchema = z.union([z.number().int().positive().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^[1-9]\d{0,15}$/)]).transform(String)
 export function telegramProfile(profile: Record<string, unknown>) {
   // OIDC sub is not the Bot API user ID. Only the signed `id` claim can
   // converge with Mini App user.id and address the corresponding bot chat.
   const id = telegramIdSchema.parse(profile.id)
-  return { id, name: `${typeof profile.name === 'string' ? profile.name.slice(0, 40) : 'Telegram'} · tg:${id}`,
+  const name = (typeof profile.name === 'string' ? profile.name : 'Telegram').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 100) || 'Telegram'
+  return { id, name, image: profileImage(profile.picture),
     email: `telegram-${id}@identity.anycord.invalid`, emailVerified: false }
 }
-export function telegramOIDC(config?: AuthenticationConfig) {
+export function telegramOIDC(env: Env, config?: AuthenticationConfig) {
   return genericOAuth({ config: config ? [{
     providerId: 'telegram', name: 'Telegram', clientId: config.clientId, clientSecret: config.clientSecret,
     discoveryUrl: 'https://oauth.telegram.org/.well-known/openid-configuration', requireIdTokenVerification: true,
@@ -23,13 +29,19 @@ export function telegramOIDC(config?: AuthenticationConfig) {
       // Generic OAuth verifies the JWT (including nonce) before calling this mapper.
       if (!tokens.idToken) return null
       const claims = decodeJwt<Record<string, unknown>>(tokens.idToken)
+      const profile = telegramProfile(claims)
+      const account = await drizzle(env.DB).select().from(authAccounts).where(and(eq(authAccounts.providerId, 'telegram'), eq(authAccounts.accountId, profile.id))).get()
+      if (account) await applyTelegramProfile(env, account.userId, profile)
       return { ...claims, email: telegramProfile(claims).email, emailVerified: false }
     },
-    mapProfileToUser: profile => { const { id, ...user } = telegramProfile(profile); return user },
+    mapProfileToUser: profile => { const { id, image, ...user } = telegramProfile(profile); return { ...user, ...(image ? { image } : {}) } },
   }] : [] })
 }
 
-const miniAppUser = z.object({ id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), first_name: z.string().min(1).max(100), last_name: z.string().max(100).optional() })
+const miniAppUser = z.object({ id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), first_name: z.string().min(1).max(100), last_name: z.string().max(100).optional(), photo_url: z.string().max(2048).optional() })
+export function miniAppProfile(telegram: z.infer<typeof miniAppUser>) {
+  return telegramProfile({ id: telegram.id, name: [telegram.first_name, telegram.last_name].filter(Boolean).join(' '), picture: telegram.photo_url })
+}
 export async function verifyMiniAppData(raw: string, botToken: string, now = Date.now()) {
   const params = new URLSearchParams(raw)
   const seen = new Set<string>()
@@ -71,14 +83,16 @@ export function telegramMiniApp(env: Env) {
           const existing = (await adapter.findAccounts(current.user.id)).find(account => account.providerId === 'telegram')
           if (existing && existing.accountId !== key.accountId) throw new APIError('CONFLICT', { message: 'Unlink the previous Telegram account first' })
           if (!owner) await adapter.linkAccount({ ...key, userId: current.user.id })
+          await applyTelegramProfile(env, current.user.id, miniAppProfile(telegram))
           return ctx.json({ ok: true })
         }
         let user = owner?.user
         if (!user) {
           if (!config.registration) throw new APIError('FORBIDDEN', { message: 'Registration is closed on this installation' })
-          const { id, ...profile } = telegramProfile({ id: telegram.id, name: [telegram.first_name, telegram.last_name].filter(Boolean).join(' ') })
+          const { id, ...profile } = miniAppProfile(telegram)
           user = (await adapter.createOAuthUser(profile, key)).user
         }
+        else await applyTelegramProfile(env, user.id, miniAppProfile(telegram))
         if (current) return ctx.json({ ok: true })
         const session = await adapter.createSession(user.id)
         await setSessionCookie(ctx, { user, session })

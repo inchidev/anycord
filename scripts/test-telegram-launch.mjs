@@ -23,7 +23,8 @@ const base = `http://127.0.0.1:${server.address().port}`
 let browser
 try {
   browser = await chromium.launch({ headless: true })
-  const user = { id: 'fixture-member', name: 'Test member', role: 'member', color: '#5865f2' }
+  const user = { id: 'fixture-member', name: 'Иван Мотовилов', role: 'member', color: '#5865f2', avatarUrl: 'https://t.me/i/userpic/320/fixture.jpg', telegram: true }
+  const avatar = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#425388"/><circle cx="40" cy="29" r="14" fill="#b7c6e9"/><path d="M12 80c0-36 56-36 56 0" fill="#b7c6e9"/></svg>'
   const signed = new URLSearchParams({
     query_id: 'synthetic-query',
     user: JSON.stringify({ id: 424242, first_name: 'Test', last_name: 'Member', photo_url: 'https://example.invalid/avatar.svg' }).replaceAll('/', '\\/'),
@@ -33,6 +34,7 @@ try {
   for (const entry of ['/login', '/main', '/servers', '/login?next=/main/general']) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' })
     const page = await context.newPage()
+    await page.route(user.avatarUrl, route => route.fulfill({ contentType: 'image/svg+xml', body: avatar }))
     await page.addInitScript(() => {
       // Model a Telegram WebView without service worker support.
       delete Navigator.prototype.serviceWorker
@@ -43,7 +45,7 @@ try {
     await page.route('https://telegram.org/js/telegram-web-app.js', route => route.fulfill({ contentType: 'text/javascript', body: `
       // Behave like the provider SDK: persist UI params and publish live CSS insets.
       sessionStorage.setItem('__telegram__initParams', JSON.stringify({ ...JSON.parse(sessionStorage.getItem('__telegram__initParams') || '{}'), ...Object.fromEntries(new URLSearchParams(location.hash.slice(1))) }));
-      window.Telegram = { WebApp: { initData: '', ready() {} } };
+      window.Telegram = { WebApp: { initData: '', ready() {}, setHeaderColor(color) { this.headerColor = color }, setBackgroundColor() {} } };
       window.setTelegramInsets = (top, bottom, left = 0, right = 0) => {
         const root = document.documentElement;
         root.style.setProperty('--tg-safe-area-inset-top', '44px');
@@ -82,6 +84,10 @@ try {
     assert.equal(await page.evaluate(() => Object.keys(sessionStorage).some(key => (sessionStorage.getItem(key) || '').includes('synthetic-query'))), false)
     assert.equal(await page.evaluate(() => Object.keys(sessionStorage).some(key => (sessionStorage.getItem(key) || '').includes('legacy-sensitive-launch'))), false)
     if (!entry.includes('next=')) {
+      await page.locator('.picker-avatar img').waitFor()
+      assert.equal(await page.locator('.picker-account strong').innerText(), user.name)
+      await page.getByText('Telegram account', { exact: true }).waitFor()
+      await page.waitForFunction(() => window.Telegram.WebApp.headerColor === '#1e1f22')
       assert((await page.locator('.picker-nav').boundingBox()).y >= 100, 'directory chrome must clear system (44px) + Telegram (56px) controls')
       await page.evaluate(() => window.setTelegramInsets(20, 10, 12, 18))
       assert.equal((await page.locator('.picker-nav').boundingBox()).y, 64, 'live SDK inset changes must update the layout')
@@ -92,7 +98,15 @@ try {
       assert.equal(attempts.length, 1, 'reload must reuse the session without persisting/replaying signed launch data')
       assert((await page.locator('.picker-nav').boundingBox()).y >= 100, 'safe areas must survive reloads after the signed fragment is removed')
       assert.equal(await page.evaluate(() => window.loginFormSeen), false, 'reload must not flash a login form')
+      if (entry === '/servers') {
+        await page.route(user.avatarUrl, route => route.abort())
+        await page.reload({ waitUntil: 'networkidle' })
+        await page.locator('.picker-avatar .avatar-initials').waitFor()
+        assert.equal(await page.locator('.picker-avatar').innerText(), 'ИМ', 'unavailable photos must fall back to name initials')
+      }
     } else {
+      await page.waitForFunction(() => window.Telegram.WebApp.headerColor === '#313338')
+      assert.equal(await page.evaluate(() => getComputedStyle(document.body, '::before').backgroundColor), 'rgb(49, 51, 56)', 'safe-area paint must match the chat header')
       const bounds = await page.locator('.chat-header').boundingBox()
       assert(bounds.y >= 100, 'chat header must clear Telegram UI')
       const composer = await page.locator('.message-composer').boundingBox()
@@ -119,9 +133,10 @@ try {
     await context.close()
     console.log(`PASS ${entry}: exact launch data, one sign-in, no login flash or identity persistence; live safe areas`)
   }
-  for (const mode of ['existing-session', 'expired-launch', 'disabled', 'setup', 'sdk-unavailable', 'remote-installation']) {
+  for (const mode of ['existing-session', 'profile-mismatch', 'expired-launch', 'disabled', 'setup', 'sdk-unavailable', 'remote-installation']) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' }), page = await context.newPage()
-    let calls = 0, authenticated = mode === 'existing-session'
+    let calls = 0, profileCalls = 0, authenticated = ['existing-session', 'profile-mismatch'].includes(mode)
+    await page.route(user.avatarUrl, route => route.fulfill({ contentType: 'image/svg+xml', body: avatar }))
     await page.addInitScript(mode => {
       delete Navigator.prototype.serviceWorker
       if (mode === 'remote-installation') {
@@ -140,15 +155,28 @@ try {
         if (mode === 'expired-launch') { status = 401; body = { message: 'Telegram login expired. Reopen the Mini App.' } }
         else authenticated = true
       } else if (path === '/api/auth/status') body = { initialized: mode !== 'setup', user: authenticated ? user : null, methods: { passwordLogin: true, registration: true, telegramLogin: true, miniAppLogin: mode !== 'disabled' } }
-      else if (path === '/api/bootstrap') body = { user, workspaces: [], channels: [], members: [] }
+      else if (path === '/api/account/telegram/profile') { profileCalls++; assert.equal(route.request().postDataJSON().initData, signed); body = mode === 'profile-mismatch' ? { ...user, id: 'different-account', name: 'Someone else' } : user }
+      else if (path === '/api/auth/logout') { authenticated = false; body = { success: true } }
+      else if (path === '/api/bootstrap') body = { user, workspaces: mode === 'existing-session' ? [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member' }] : [], channels: [], members: [] }
       else if (path === '/api/runtime') body = { apiVersion: 1, engine: 'cloudflare', auth: 'better-auth', realtime: 'websocket', build }
       await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     })
     await page.goto(base + '/servers#' + launch, { waitUntil: 'networkidle' })
-    if (['existing-session', 'sdk-unavailable'].includes(mode)) await page.getByRole('heading', { name: 'Servers', exact: true }).waitFor()
+    if (['existing-session', 'profile-mismatch', 'sdk-unavailable'].includes(mode)) await page.getByRole('heading', { name: 'Servers', exact: true }).waitFor()
     else await page.getByRole('heading', { name: mode === 'setup' ? 'Create the first account' : mode === 'remote-installation' ? 'Log in to your installation' : 'Welcome back.', exact: true }).waitFor()
     assert.equal(calls, ['expired-launch', 'sdk-unavailable'].includes(mode) ? 1 : 0, `${mode}: avoid retries or bypassing installation policy`)
+    if (mode === 'profile-mismatch') assert.equal(await page.locator('.picker-account strong').innerText(), user.name, 'a profile result for another session must not replace the current user')
     if (mode === 'expired-launch') await page.getByText('Telegram login expired. Reopen the Mini App.', { exact: true }).waitFor()
+    if (mode === 'existing-session') {
+      assert.equal(profileCalls, 1, 'existing sessions refresh verified profile data without signing in again')
+      await page.locator('a.server-choice').click()
+      await page.getByRole('button', { name: 'Open channels', exact: true }).click()
+      await page.getByRole('button', { name: 'User Settings', exact: true }).click()
+      await page.locator('.account-session').getByRole('button', { name: 'Log Out', exact: true }).click()
+      await page.waitForTimeout(400)
+      assert.equal(calls, 0, 'explicit logout must not trigger automatic Telegram reauthentication')
+      await page.getByRole('heading', { name: 'Welcome back.', exact: true }).waitFor()
+    }
     await context.close()
     console.log(`PASS ${mode}: existing sessions, failure fallback and installation policy remain usable`)
   }

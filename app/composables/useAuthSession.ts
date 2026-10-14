@@ -13,6 +13,18 @@ export function useAuthSession(enabled = computed(() => true)) {
     queryKey: ['auth'], retry: false, enabled,
     queryFn: async () => {
       const status = await api('authStatus')
+      // An existing local session also consumes launch-time auto-login. Do not
+      // undo an explicit logout later by reusing the still-fresh launch data.
+      if (status.user && !target.origin && initData) {
+        session.attempt ||= Promise.resolve()
+        if (status.user.telegram && status.methods?.miniAppLogin) {
+          // Refresh the profile without creating a session, changing accounts,
+          // or treating unverified SDK user data as identity.
+          session.profileAttempt ||= api('telegramProfileSync', { body: { initData } }).catch(() => undefined)
+          const profile = await session.profileAttempt
+          return profile?.id === status.user.id ? { ...status, user: profile } : status
+        }
+      }
       if (status.user || !status.initialized || !status.methods?.miniAppLogin || target.origin || !initData) return status
       if (!session.attempt) {
         session.attempt = $fetch('/api/auth/telegram/miniapp', { method: 'POST', body: { initData, link: false } })

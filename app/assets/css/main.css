@@ -291,3 +291,8 @@ button, a { touch-action: manipulation; }
 .app-status { top: calc(12px + var(--app-safe-top)); max-width: calc(100% - var(--app-safe-left) - var(--app-safe-right) - 24px); }
 html[data-telegram] [role="dialog"][data-slot="content"] { max-height: calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom) - 32px); top: calc((var(--app-viewport-height) + var(--app-safe-top) - var(--app-safe-bottom)) / 2); max-width: calc(100% - var(--app-safe-left) - var(--app-safe-right) - 32px); }
 html[data-telegram] [role="dialog"].settings-fullscreen { inset: var(--app-safe-top) var(--app-safe-right) var(--app-safe-bottom) var(--app-safe-left); height: calc(var(--app-viewport-height) - var(--app-safe-top) - var(--app-safe-bottom)); max-height: none; width: auto; max-width: none; transform: none; }
+/* The Telegram overlay and native top bar share the active Anycord header. */
+html[data-telegram] body::before { content: ''; position: fixed; z-index: 1001; top: 0; left: 0; right: 0; height: var(--app-safe-top); background: var(--telegram-header-color, var(--rail)); pointer-events: none; }
+html[data-telegram] .discord-shell { background: var(--telegram-header-color, var(--chat)); }
+.avatar > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.picker-account { gap: 12px; }.picker-account .picker-avatar { width: 40px; height: 40px; flex: 0 0 40px; font-size: 14px; }.picker-account strong { display: block; font-size: 14px; font-weight: 600; color: var(--ui-text-highlighted); line-height: 1.4; }.picker-account small { display: flex; align-items: center; gap: 5px; font-size: 12px; margin-top: 3px; }.picker-account small img { flex: 0 0 14px; width: 14px; height: 14px; }

@@ -60,7 +60,7 @@ export const integrationSchema = z.object({
   aiModel: z.string().trim().max(120).default('openai/gpt-4.1-mini'),
 })
 // IDs are opaque: seeded and migrated IDs are not necessarily UUIDs.
-export const userSchema = z.object({ id: idSchema, name: z.string(), color: z.string(), role: z.string() })
+export const userSchema = z.object({ id: idSchema, name: z.string(), color: z.string(), role: z.string(), avatarUrl: z.string().nullable().optional(), telegram: z.boolean().optional() })
 export const workspaceResultSchema = z.object({ id: idSchema, name: z.string(), initials: z.string(), role: z.string() })
 export const channelResultSchema = z.object({ id: idSchema, workspaceId: idSchema, name: z.string(), topic: z.string(), kind: z.enum(['text', 'voice']) })
 export const threadSummarySchema = z.object({ id: idSchema, name: z.string(), messageCount: z.number().int().nonnegative() })
@@ -71,7 +71,7 @@ export const attachmentSchema = attachmentInputSchema.extend({ id: z.uuid(), con
 export const storageInputSchema = z.object({ driver: z.enum(['r2', 's3']), endpoint: z.string().trim().max(512).default(''), bucket: z.string().trim().max(63).default(''), region: z.string().trim().max(64).default('auto'), accessKeyId: z.string().trim().max(256).optional(), secretAccessKey: z.string().trim().max(512).optional() })
 export const storageStatusSchema = z.object({ configured: z.boolean(), nativeAvailable: z.boolean(), driver: z.enum(['r2', 's3']).nullable(), endpoint: z.string(), bucket: z.string(), region: z.string(), maxBytes: z.number(), maxFiles: z.number() })
 export const messageResultSchema = z.object({
-  id: idSchema, channelId: idSchema, authorId: idSchema, author: z.string(), color: z.string(), text: z.string(),
+  id: idSchema, channelId: idSchema, authorId: idSchema, author: z.string(), avatarUrl: z.string().nullable().optional(), color: z.string(), text: z.string(),
   createdAt: z.number().int(), editedAt: z.number().int().nullable(), bot: z.boolean(),
   attachments: z.array(attachmentSchema).default([]),
   reactions: z.array(z.object({ emoji: z.string(), count: z.number().int().positive(), mine: z.boolean() })),

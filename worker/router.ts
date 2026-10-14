@@ -20,6 +20,8 @@ import { authenticationInputSchema, telegramIntegrationInputSchema, telegramPref
 import { telegramAccount, updateTelegramPreferences, unlinkTelegram, telegramWebhook, queueTelegramNotifications, flushTelegramNotifications, testTelegramNotification } from './telegram-notifications'
 import { authAccounts, authUsers } from '../db/auth-schema'
 import { safeNext } from '../shared/navigation'
+import { profileColumns, publicProfileName, telegramProfileJoin, applyTelegramProfile, userProfile } from './user-profiles'
+import { verifyMiniAppData, miniAppProfile } from './telegram-plugin'
 
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
 const hub = (env: Env, workspaceId: string) => env.HUBS.getByName(workspaceId)
@@ -204,7 +206,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       await db.delete(tables.invitations).where(and(eq(tables.invitations.id, endpoint.params.inviteId!), eq(tables.invitations.workspaceId, workspaceId))).run()
       return json({ ok: true })
     }
-    if (endpoint.name === 'bans') return json(await db.select({ id: tables.users.id, name: tables.users.name, createdAt: tables.workspaceBans.createdAt }).from(tables.workspaceBans).innerJoin(tables.users, eq(tables.workspaceBans.userId, tables.users.id)).where(eq(tables.workspaceBans.workspaceId, workspaceId)).all())
+    if (endpoint.name === 'bans') return json(await db.select({ id: tables.users.id, name: publicProfileName, createdAt: tables.workspaceBans.createdAt }).from(tables.workspaceBans).innerJoin(tables.users, eq(tables.workspaceBans.userId, tables.users.id)).leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin).where(eq(tables.workspaceBans.workspaceId, workspaceId)).all())
     if (endpoint.name === 'memberUnban') {
       await db.delete(tables.workspaceBans).where(and(eq(tables.workspaceBans.workspaceId, workspaceId), eq(tables.workspaceBans.userId, endpoint.params.userId!))).run()
       return json({ ok: true })
@@ -223,6 +225,19 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     await configureTelegramWebhook(env); return json({ ok: true })
   }
   if (endpoint?.name === 'telegramAccount') return json(await telegramAccount(env, user.id))
+  if (endpoint?.name === 'telegramProfileSync') {
+    const config = await authenticationConfig(env)
+    if (!config.miniAppLogin || !config.botToken) throw new HttpError(403, 'Mini App profile sync is unavailable')
+    const { initData } = endpoint.spec.body.parse(await readBody(request)) as { initData: string }
+    let telegram
+    try { telegram = await verifyMiniAppData(initData, config.botToken) }
+    catch { throw new HttpError(401, 'Reopen the Mini App to refresh your Telegram profile') }
+    const linked = await db.select().from(authAccounts).where(and(eq(authAccounts.userId, user.id), eq(authAccounts.providerId, 'telegram'), eq(authAccounts.accountId, String(telegram.id)))).get()
+    if (!linked) throw new HttpError(403, 'This Telegram account is not linked to your account')
+    if (!await hub(env, '_auth').consumeRate(`telegram-profile:${user.id}`, 15)) throw new HttpError(429, 'Please wait before refreshing your profile')
+    await applyTelegramProfile(env, user.id, miniAppProfile(telegram))
+    return json(await userProfile(env, user.id))
+  }
   if (endpoint?.name === 'telegramPreferences') return json(await updateTelegramPreferences(env, user.id, telegramPreferencesInputSchema.parse(await readBody(request))))
   if (endpoint?.name === 'telegramUnlink') { await unlinkTelegram(env, user.id); return json({ ok: true }) }
   if (endpoint?.name === 'telegramTest') {
@@ -272,7 +287,8 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     const workspaceId = url.searchParams.get('workspace') || spaces[0]?.id || 'main'
     await requireMembership(env, user.id, workspaceId)
     const channels = await db.select().from(tables.channels).where(eq(tables.channels.workspaceId, workspaceId)).orderBy(tables.channels.position).all()
-    const members = await db.select({ id: tables.users.id, name: tables.users.name, color: tables.users.color, role: tables.users.role, workspaceRole: tables.memberships.role }).from(tables.users)
+    const members = await db.select({ ...profileColumns, workspaceRole: tables.memberships.role }).from(tables.users)
+      .leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin)
       .innerJoin(tables.memberships, and(eq(tables.memberships.userId, tables.users.id), eq(tables.memberships.workspaceId, workspaceId))).all()
     return json({ user, workspaces: spaces, channels, members })
   }
@@ -322,8 +338,9 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     await requireMembership(env, user.id, workspaceId)
     const q = (url.searchParams.get('q') || '').trim().slice(0, 100)
     if (!q) return json([])
-    const rows = await db.select({ id: tables.messages.id, text: tables.messages.text, channelId: tables.channels.id, channel: tables.channels.name, authorId: tables.users.id, author: tables.users.name, createdAt: tables.messages.createdAt, threadId: tables.messages.threadId })
+    const rows = await db.select({ id: tables.messages.id, text: tables.messages.text, channelId: tables.channels.id, channel: tables.channels.name, authorId: tables.users.id, author: publicProfileName, createdAt: tables.messages.createdAt, threadId: tables.messages.threadId })
       .from(tables.messages).innerJoin(tables.channels, eq(tables.channels.id, tables.messages.channelId)).innerJoin(tables.users, eq(tables.users.id, tables.messages.authorId))
+      .leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin)
       .where(and(eq(tables.channels.workspaceId, workspaceId), sql`instr(lower(${tables.messages.text}), lower(${q})) > 0`))
       .orderBy(desc(tables.messages.createdAt)).limit(40).all()
     return json(rows.map(({ authorId, ...row }) => ({ ...row, author: authorId === 'system' ? 'Anycord' : row.author })))

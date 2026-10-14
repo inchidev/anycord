@@ -12,7 +12,7 @@ async function files(dir) {
 }
 // Nuxt's generic SPA shell contains no account or conversation data.
 await copyFile(root + '/200.html', root + '/app-shell.html')
-const assets = ['/app-shell', '/manifest.webmanifest', '/favicon.png', '/brand/anycord-symbol.png', ...await files('/icons'), ...await files('/_nuxt')]
+const assets = ['/app-shell', '/manifest.webmanifest', '/favicon.png', '/brand/anycord-symbol.png', '/brand/telegram.svg', ...await files('/icons'), ...await files('/_nuxt')]
 const hash = createHash('sha256')
 hash.update(await readFile('shared/build-info.json'))
 for (const path of assets.sort()) hash.update(path).update(await readFile(root + (path === '/app-shell' ? '/app-shell.html' : path)))

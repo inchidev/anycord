@@ -3,6 +3,8 @@ import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
 import type { Message, Thread, User } from '../shared/contracts'
 import { HttpError } from './security'
+import { authUsers, authAccounts } from '../db/auth-schema'
+import { publicProfileName, telegramProfileJoin } from './user-profiles'
 
 export const database = (env: Env) => drizzle(env.DB, { schema })
 export async function requireMembership(env: Env, userId: string, workspaceId: string) {
@@ -43,17 +45,19 @@ export async function getMessages(env: Env, channelId: string, userId: string, m
   if (focusId && !focus) throw new HttpError(404, 'Message not found')
   const rows = await db.select({
     id: schema.messages.id, channelId: schema.messages.channelId, authorId: schema.messages.authorId,
-    author: schema.users.name, color: schema.users.color, role: schema.users.role,
+    author: publicProfileName, avatarUrl: authUsers.image, color: schema.users.color, role: schema.users.role,
     text: schema.messages.text, createdAt: schema.messages.createdAt, editedAt: schema.messages.editedAt,
     replyToId: schema.messages.replyToId, threadId: schema.messages.threadId,
   }).from(schema.messages).innerJoin(schema.users, eq(schema.users.id, schema.messages.authorId))
+    .leftJoin(authUsers, eq(authUsers.id, schema.users.id)).leftJoin(authAccounts, telegramProfileJoin)
     .where(messageId ? and(eq(schema.messages.channelId, channelId), eq(schema.messages.id, messageId)) : context)
     .orderBy(focus ? sql`abs(${schema.messages.createdAt} - ${focus.createdAt})` : desc(schema.messages.createdAt), desc(schema.messages.id)).limit(100).all()
   const reactions = rows.length ? await db.select().from(schema.reactions).where(inArray(schema.reactions.messageId, rows.map((row) => row.id))).all() : []
   const replyIds = [...new Set(rows.flatMap((row) => row.replyToId ? [row.replyToId] : []))]
   const replies: { id: string; authorId: string; author: string; text: string; threadId: string | null }[] = []
-  for (let i = 0; i < replyIds.length; i += 80) replies.push(...await db.select({ id: schema.messages.id, authorId: schema.users.id, author: schema.users.name, text: schema.messages.text, threadId: schema.messages.threadId })
+  for (let i = 0; i < replyIds.length; i += 80) replies.push(...await db.select({ id: schema.messages.id, authorId: schema.users.id, author: publicProfileName, text: schema.messages.text, threadId: schema.messages.threadId })
     .from(schema.messages).innerJoin(schema.users, eq(schema.users.id, schema.messages.authorId))
+    .leftJoin(authUsers, eq(authUsers.id, schema.users.id)).leftJoin(authAccounts, telegramProfileJoin)
     .where(and(eq(schema.messages.channelId, channelId), inArray(schema.messages.id, replyIds.slice(i, i + 80)))).all())
   const threads = await getThreads(env, channelId, undefined, rows.map((row) => row.id))
   const files: { id: string; name: string; size: number; contentType: string; messageId: string | null }[] = []

@@ -9,7 +9,7 @@ const account = useQuery({ queryKey: ['telegram-account'], queryFn: () => api('t
 const state = reactive({ enabled: false, preview: false, mutedChannelIds: [] as string[] })
 const password = reactive({ name: '', password: '' }), error = ref(''), feedback = ref(''), linking = ref(false)
 watch(account.data, data => { if (data) { state.enabled = data.enabled; state.preview = data.preview; state.mutedChannelIds = [...data.mutedChannelIds] } }, { immediate: true })
-async function refresh() { await client.invalidateQueries({ queryKey: ['telegram-account'] }) }
+async function refresh() { await Promise.all([client.invalidateQueries({ queryKey: ['telegram-account'] }), client.invalidateQueries({ queryKey: ['auth'] }), client.invalidateQueries({ queryKey: ['bootstrap'] })]) }
 const save = useMutation({ mutationFn: () => api('telegramPreferences', { body: state }), onSuccess: async () => { feedback.value = 'Telegram preferences saved.'; await refresh() }, onError: cause => { error.value = apiError(cause) } })
 const unlink = useMutation({ mutationFn: () => api('telegramUnlink'), onSuccess: refresh, onError: cause => { error.value = apiError(cause) } })
 const test = useMutation({ mutationFn: () => api('telegramTest'), onSuccess: () => { feedback.value = 'Test notification sent to Telegram.' }, onError: cause => { error.value = apiError(cause) } })

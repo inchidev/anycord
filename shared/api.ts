@@ -36,6 +36,7 @@ export const endpoints = {
   telegramIntegrationUpdate: endpoint('PUT', '/api/integrations/telegram', telegramIntegrationInputSchema, telegramIntegrationStatusSchema),
   telegramWebhookSetup: endpoint('POST', '/api/integrations/telegram/webhook', none, ok),
   telegramAccount: endpoint('GET', '/api/account/telegram', none, telegramAccountStatusSchema),
+  telegramProfileSync: endpoint('POST', '/api/account/telegram/profile', z.object({ initData: z.string().min(1).max(16_000) }), userSchema),
   telegramPreferences: endpoint('PUT', '/api/account/telegram', telegramPreferencesInputSchema, telegramAccountStatusSchema),
   telegramUnlink: endpoint('DELETE', '/api/account/telegram', none, ok),
   telegramTest: endpoint('POST', '/api/account/telegram/test', none, ok),

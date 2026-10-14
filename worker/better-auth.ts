@@ -13,17 +13,20 @@ import { database } from './store'
 import { digest, verifyPassword as legacyVerify } from './security'
 import { authenticationConfig, initialized, type AuthenticationConfig } from './authentication'
 import { telegramMiniApp, telegramOIDC } from './telegram-plugin'
+import { userProfile } from './user-profiles'
 
 function legacyToken(headers: Headers | undefined) { return headers?.get('cookie')?.match(/(?:^|;\s*)cellcord_session=([a-f0-9]{64})/)?.[1] || '' }
-export async function ensureProfile(env: Env, identity: { id: string; name: string; username?: string | null }) {
-  const existing = await database(env).select({ id: users.id, name: users.name, color: users.color, role: users.role }).from(users).where(eq(users.id, identity.id)).get()
+export async function ensureProfile(env: Env, identity: { id: string; name: string; username?: string | null; email?: string }) {
+  const existing = await userProfile(env, identity.id)
   if (existing) return existing
   const color = ['#5865f2', '#57f287', '#eb459e', '#fee75c', '#2dc4c4', '#f79356'][parseInt((await digest(identity.id)).slice(0, 2), 16) % 6] || '#5865f2'
+  const telegramId = identity.email?.match(/^telegram-([1-9]\d{0,15})@identity\.anycord\.invalid$/)?.[1]
+  const handle = identity.username || (telegramId ? `${identity.name.toLowerCase()} · tg:${telegramId}` : identity.name.toLowerCase())
   await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO users (id, name, password_hash, color, role, created_at) SELECT ?, ?, 'disabled', ?, CASE WHEN EXISTS (SELECT 1 FROM users WHERE role = 'owner') THEN 'member' ELSE 'owner' END, ?").bind(identity.id, identity.username || identity.name.toLowerCase(), color, Date.now()),
+    env.DB.prepare("INSERT OR IGNORE INTO users (id, name, password_hash, color, role, created_at) SELECT ?, ?, 'disabled', ?, CASE WHEN EXISTS (SELECT 1 FROM users WHERE role = 'owner') THEN 'member' ELSE 'owner' END, ?").bind(identity.id, handle, color, Date.now()),
     env.DB.prepare("INSERT OR IGNORE INTO memberships (user_id, workspace_id, role) SELECT id, 'main', CASE WHEN role = 'owner' THEN 'owner' ELSE 'member' END FROM users WHERE id = ?").bind(identity.id),
   ])
-  return database(env).select({ id: users.id, name: users.name, color: users.color, role: users.role }).from(users).where(eq(users.id, identity.id)).get()
+  return userProfile(env, identity.id)
 }
 export async function revokeLiveSession(env: Env, token: string, userId: string) {
   const rows = await database(env).select().from(memberships).where(eq(memberships.userId, userId)).all()
@@ -66,7 +69,7 @@ export function createAuth(env: Env, oidc?: AuthenticationConfig) {
         after: async (user) => { await ensureProfile(env, user) },
       } },
     },
-    plugins: [telegramOIDC(oidc), telegramMiniApp(env), bearer({ requireSignature: true }), username({ minUsernameLength: 2, maxUsernameLength: 32, displayUsername: false, immutableUsername: true, usernameValidator: (value) => /^[a-zA-Z0-9_ -]+$/.test(value) }), {
+    plugins: [telegramOIDC(env, oidc), telegramMiniApp(env), bearer({ requireSignature: true }), username({ minUsernameLength: 2, maxUsernameLength: 32, displayUsername: false, immutableUsername: true, usernameValidator: (value) => /^[a-zA-Z0-9_ -]+$/.test(value) }), {
       id: 'legacy-session-migration',
       endpoints: {
         migrateLegacySession: createAuthEndpoint('/migrate-legacy-session', { method: 'POST' }, async (ctx) => {

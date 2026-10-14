@@ -1,3 +1,4 @@
+import type { MiniAppSession } from '../utils/telegram'
 export default defineNuxtPlugin({
   name: 'telegram-launch',
   // Nuxt's router runs at pre (-20). Its hash normalization decodes the
@@ -50,6 +51,6 @@ export default defineNuxtPlugin({
       // history URLs, localStorage or sessionStorage.
       window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
     }
-    return { provide: { telegramLaunchData: initData, telegramSession: {} as { attempt?: Promise<void>; authenticated?: boolean } } }
+    return { provide: { telegramLaunchData: initData, telegramSession: {} as MiniAppSession } }
   },
 })

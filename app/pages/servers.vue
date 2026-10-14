@@ -30,7 +30,7 @@ onBeforeUnmount(() => clearTimeout(loadingTimer))
         <div v-else class="picker-empty"><UIcon name="i-lucide-messages-square" /><h2>No servers yet</h2><p>{{ auth.data.value?.user?.role === 'owner' ? 'Create your first server to start a conversation.' : 'Ask a server owner for an invitation, or switch installation.' }}</p></div>
         <button v-if="auth.data.value?.user?.role === 'owner'" class="picker-create" @click="connections.show('create')"><span><UIcon name="i-lucide-plus" /></span>Create a server</button>
       </template>
-      <footer class="picker-footer"><span v-if="auth.data.value?.user" class="picker-account"><UIcon name="i-lucide-user-round" /><span>Signed in as <strong>{{ auth.data.value.user.name }}</strong></span></span><UButton v-if="pwa.canInstall.value" variant="ghost" color="neutral" icon="i-lucide-download" @click="pwa.install()">Install Anycord</UButton></footer>
+      <footer class="picker-footer"><div v-if="auth.data.value?.user" class="picker-account"><UserAvatar class="picker-avatar" :name="auth.data.value.user.name" :color="auth.data.value.user.color" :src="auth.data.value.user.avatarUrl" /><span><strong>{{ auth.data.value.user.name }}</strong><small v-if="auth.data.value.user.telegram"><img src="/brand/telegram.svg" alt="" width="14" height="14" />Telegram account</small><small v-else>Signed in</small></span></div><UButton v-if="pwa.canInstall.value" variant="ghost" color="neutral" icon="i-lucide-download" @click="pwa.install()">Install Anycord</UButton></footer>
     </section>
   </main>
 </template>

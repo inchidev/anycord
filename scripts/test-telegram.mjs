@@ -26,7 +26,7 @@ const provider = async request => {
       const input = new URLSearchParams(await request.text()), flow = flows.get(input.get('code'))
       assert(flow, 'Only a code from the test authorization server may be redeemed')
       assert.equal(createHash('sha256').update(input.get('code_verifier')).digest('base64url'), flow.challenge)
-      const payload = { id: flow.id, name: 'Telegram member', nonce: flow.nonce }
+      const payload = { id: flow.id, name: 'Telegram member', picture: 'https://cdn4.telesco.pe/file/test-avatar.jpg', nonce: flow.nonce }
       if (flow.badNonce) payload.nonce = 'wrong-nonce'
       const jwt = await new SignJWT(payload).setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
         .setIssuer(flow.badIssuer ? 'https://attacker.test' : issuer).setAudience(flow.badAudience ? 'wrong-client' : '12345')
@@ -62,7 +62,7 @@ async function request(path, { who = actor(), method = 'GET', body, status = 200
   return { data: raw ? JSON.parse(raw) : null, headers: result.headers, who }
 }
 function initData(id, extra = {}, timestamp = Math.floor(Date.now() / 1000)) {
-  const params = new URLSearchParams({ auth_date: String(timestamp), query_id: crypto.randomUUID(), user: JSON.stringify({ id, first_name: 'Telegram member' }), ...extra })
+  const params = new URLSearchParams({ auth_date: String(timestamp), query_id: crypto.randomUUID(), user: JSON.stringify({ id, first_name: 'Telegram member', photo_url: 'https://cdn4.telesco.pe/file/test-avatar.jpg' }), ...extra })
   const check = [...params].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join('\n')
   const key = createHmac('sha256', 'WebAppData').update(token).digest()
   params.set('hash', createHmac('sha256', key).update(check).digest('hex'))
@@ -114,10 +114,28 @@ try {
   await oauth(browser, 42)
   const browserUser = (await request('/api/auth/status', { who: browser })).data.user
   assert(browserUser); assert.notEqual(browserUser.id, '42')
+  assert.equal(browserUser.name, 'Telegram member'); assert.equal(browserUser.telegram, true)
+  assert.equal(browserUser.avatarUrl, 'https://cdn4.telesco.pe/file/test-avatar.jpg')
   const mini = actor()
   await request('/api/auth/telegram/miniapp', { who: mini, method: 'POST', body: { initData: initData(42) } })
   assert.equal((await request('/api/auth/status', { who: mini })).data.user.id, browserUser.id)
   assert.equal((await db.prepare("SELECT account_id FROM auth_account WHERE user_id = ? AND provider_id = 'telegram'").bind(browserUser.id).first()).account_id, '42')
+  const oldHandle = await db.prepare('SELECT name FROM users WHERE id = ?').bind(browserUser.id).first('name')
+  await db.prepare('UPDATE auth_user SET name = ? WHERE id = ?').bind('Telegram member · tg:42', browserUser.id).run()
+  assert.equal((await request('/api/auth/status', { who: mini })).data.user.name, 'Telegram member', 'legacy suffix is removed without changing the unique account handle')
+  const sessionsBeforeProfile = await db.prepare('SELECT count(*) AS n FROM auth_session').first('n')
+  const refreshedProfile = initData(42, { user: JSON.stringify({ id: 42, first_name: 'Иван', last_name: 'Мотовилов', photo_url: 'https://t.me/i/userpic/320/test-avatar.jpg' }) })
+  await request('/api/account/telegram/profile', { method: 'POST', body: { initData: refreshedProfile }, status: 401 })
+  const refreshed = (await request('/api/account/telegram/profile', { who: mini, method: 'POST', body: { initData: refreshedProfile } })).data
+  assert.equal(refreshed.name, 'Иван Мотовилов'); assert.equal(refreshed.avatarUrl, 'https://t.me/i/userpic/320/test-avatar.jpg')
+  const profileMember = (await request('/api/bootstrap?workspace=main', { who: mini })).data.members.find(user => user.id === browserUser.id)
+  assert.equal(profileMember.name, refreshed.name); assert.equal(profileMember.avatarUrl, refreshed.avatarUrl)
+  assert.equal(await db.prepare('SELECT name FROM users WHERE id = ?').bind(browserUser.id).first('name'), oldHandle)
+  assert.equal(await db.prepare('SELECT count(*) AS n FROM auth_session').first('n'), sessionsBeforeProfile, 'profile sync must not create a login session')
+  await request('/api/account/telegram/profile', { who: mini, method: 'POST', body: { initData: initData(43) }, status: 403 })
+  await request('/api/account/telegram/profile', { who: mini, method: 'POST', body: { initData: refreshedProfile.replace('test-avatar', 'forged-avatar') }, status: 401 })
+  await oauth(actor(), 42, { badNonce: true })
+  assert.equal((await request('/api/auth/status', { who: mini })).data.user.name, 'Иван Мотовилов', 'unverified or mismatched provider data must not overwrite a profile')
   for (const malformed of [initData(42).replace('Telegram', 'Forged'), initData(42, {}, Math.floor(Date.now() / 1000) - 600), initData(42) + '&auth_date=1', initData(42, {}, Math.floor(Date.now() / 1000) + 120)]) {
     await request('/api/auth/telegram/miniapp', { method: 'POST', body: { initData: malformed }, status: 401 })
   }
@@ -126,11 +144,16 @@ try {
   const ownerMini = actor()
   await request('/api/auth/telegram/miniapp', { who: ownerMini, method: 'POST', body: { initData: initData(43) } })
   assert.equal((await request('/api/auth/status', { who: ownerMini })).data.user.id, first.data.user.id)
+  assert.equal((await request('/api/auth/status', { who: ownerMini })).data.user.name, 'owner', 'linking Telegram keeps an existing password account name')
   await request('/api/auth/sign-in/social', { who: owner, method: 'POST', body: { provider: 'telegram' }, status: 409 })
   await request('/api/auth/telegram/miniapp', { who: member, method: 'POST', body: { initData: initData(44), link: true } })
   const miniFirst = actor()
   await request('/api/auth/telegram/miniapp', { who: miniFirst, method: 'POST', body: { initData: initData(45) } })
   const miniFirstUser = (await request('/api/auth/status', { who: miniFirst })).data.user
+  assert.equal(miniFirstUser.name, browserUser.name); assert.notEqual(miniFirstUser.id, browserUser.id, 'same display name is not the same account')
+  const invalidAvatar = actor()
+  await request('/api/auth/telegram/miniapp', { who: invalidAvatar, method: 'POST', body: { initData: initData(46, { user: JSON.stringify({ id: 46, first_name: 'Telegram member', photo_url: 'javascript:alert(1)' }) }) } })
+  assert.equal((await request('/api/auth/status', { who: invalidAvatar })).data.user.avatarUrl, null)
   await db.prepare('UPDATE auth_session SET created_at = ? WHERE user_id = ?').bind(Date.now() - 1200_000, miniFirstUser.id).run()
   await request('/api/account/password', { who: miniFirst, method: 'POST', body: { username: 'stale_session', password: credentials.password }, status: 403 })
   assert.equal(await db.prepare('SELECT username FROM auth_user WHERE id = ?').bind(miniFirstUser.id).first('username'), null)
@@ -164,6 +187,9 @@ try {
   await request('/api/channels/general/messages', { who: owner, method: 'POST', body: { id: crypto.randomUUID(), text: '@telegram_member an explicit mention' }, status: 201 })
   await request('/_test/flush'); assert.equal(deliveries.length, 1); deliveries.length = 0
   const root = await request('/api/channels/general/messages', { who: browser, method: 'POST', body: { id: crypto.randomUUID(), text: 'A message to reply to' }, status: 201 })
+  assert.equal(root.data.author, 'Telegram member'); assert.equal(root.data.avatarUrl, 'https://cdn4.telesco.pe/file/test-avatar.jpg')
+  const search = (await request('/api/search?workspace=main&q=A%20message%20to%20reply', { who: browser })).data
+  assert.equal(search.find(message => message.id === root.data.id).author, 'Telegram member')
   const reply = { id: crypto.randomUUID(), text: 'A private reply preview', replyToId: root.data.id }
   await request('/api/channels/general/messages', { who: owner, method: 'POST', body: reply, status: 201 })
   await request('/_test/flush')
@@ -189,6 +215,8 @@ try {
   await request('/_test/flush'); assert.equal(deliveries.length, 2, 'Revoked membership must stop queued delivery')
   await request('/api/account/telegram', { who: browser, method: 'DELETE' })
   assert.equal((await request('/api/account/telegram', { who: browser })).data.linked, false)
+  const unlinked = (await request('/api/auth/status', { who: browser })).data.user
+  assert.equal(unlinked.name, 'Telegram member'); assert.equal(unlinked.telegram, false); assert.equal(unlinked.avatarUrl, 'https://cdn4.telesco.pe/file/test-avatar.jpg')
   await request('/api/account/telegram/test', { who: browser, method: 'POST', status: 409 })
   console.log('PASS: real Worker/D1 Better Auth sessions; OIDC PKCE/JWKS/nonce/claim validation; Mini App signatures; identity convergence/linking; setup/admission/owner recovery; encrypted settings; webhook consent; reply/follow/mute/dedup/retry/access revocation.')
 } finally { try { await mf?.dispose() } finally { await rm(dir, { recursive: true, force: true }) } }
