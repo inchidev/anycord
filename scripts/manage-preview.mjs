@@ -4,6 +4,7 @@ import { appendFile, lstat, readFile, readdir, writeFile } from 'node:fs/promise
 import { resolve, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { accountId, authorize, githubClient, previewConfig, previewIdentity, previewSecrets, productionDatabase, repository, validatePull } from './preview-policy.mjs'
+import { waitForPreview } from './verify-preview.mjs'
 
 const operation = process.env.PREVIEW_OPERATION
 assert(['deploy', 'destroy'].includes(operation))
@@ -123,11 +124,7 @@ if (operation === 'destroy') {
     await delay(2000)
   }
   assert(healthy, 'Preview migration/health check failed')
-  const publicVersion = await (await fetch(origin + '/version.json', { redirect: 'error' })).json()
-  assert.deepEqual(publicVersion, expected)
-  for (const path of ['/login', '/servers', '/manifest.webmanifest', '/sw.js']) {
-    assert((await fetch(origin + path, { redirect: 'error' })).ok, `Preview route failed: ${path}`)
-  }
+  await waitForPreview(origin, expected)
   await checkAuthorization()
   await appendFile(process.env.GITHUB_OUTPUT, `url=${origin}\n`)
   await appendFile(process.env.GITHUB_STEP_SUMMARY, `Preview PR #${pr}: [Open preview](${origin})\n\nSource: \`${expected.commit}\`\n\nIsolated Worker/D1/R2/DO; schema \`${expected.schema}\`. First-account setup code is derived from the private preview seed; it is never published in logs. See docs/previews.md.\n`)
