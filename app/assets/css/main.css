@@ -135,7 +135,11 @@ button, a { touch-action: manipulation; }
 .channel-heading .server-heading { flex: 1; min-width: 0; }
 .mobile-rail-brand, .mobile-close-channels, .mobile-search { display: none; }
 @media (max-width: 700px) {
-  .discord-shell { position: fixed; top: var(--visual-top, 0px); left: 0; right: 0; height: var(--visual-height, 100dvh); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--rail); }
+  html.mobile-chat-viewport { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  body.mobile-chat-viewport { position: fixed; inset: 0; height: 100%; min-height: 0; overflow: hidden; overscroll-behavior: none; }
+  body.mobile-chat-viewport #__nuxt, .workspace-client { height: 100%; min-height: 0; overflow: hidden; }
+  .discord-shell { position: absolute; top: var(--visual-top, 0px); left: 0; right: 0; height: var(--visual-height, 100dvh); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--rail); }
+  .discord-shell.keyboard-open { padding-bottom: 0; }
   .desktop-titlebar { display: none; }
   .workspace-layout { min-width: 0; }
   .workspace-navigation { display: flex; position: absolute; top: 0; bottom: 0; left: 0; width: min(336px, calc(100% - 36px)); z-index: 40; background: var(--rail); visibility: hidden; transform: translateX(-105%); transition: transform .18s ease, visibility .18s; }
