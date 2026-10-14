@@ -18,6 +18,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node --test scripts/test-preview-policy.mjs
       - run: npm run verify
       - run: npx playwright install --with-deps --only-shell chromium
       - run: npm run test:telegram-launch

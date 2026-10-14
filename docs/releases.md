@@ -1,6 +1,6 @@
 # Releases and recovery
 
-All source changes go through a PR to `main`. GitHub's required `check` job verifies the application. Automatic Cloudflare PR previews are disabled until a maintainer-gated isolated preview flow is implemented in #2. GitHub requires approval for all external fork contributors. The Cloudflare main-branch build is verification-only: its deploy command is `node -e "console.log('Verification only; promote a published release explicitly')"`. Neither merging nor publishing updates tenant installations.
+All source changes go through a PR to `main`. GitHub's required `check` job verifies the application. [PR previews](previews.md) are explicitly launched from main by Maintain/Admin for a reviewed SHA, using isolated resources. Automatic Cloudflare PR previews remain disabled. GitHub requires approval for all external fork contributors. The Cloudflare main-branch build is verification-only: its deploy command is `node -e "console.log('Verification only; promote a published release explicitly')"`. Neither merging nor publishing updates tenant installations.
 
 ## Publish
 
@@ -13,7 +13,7 @@ Assets:
 - `anycord-release.json`: source commit, app/API/schema versions, supported engines and package hashes/sizes.
 - `SHA256SUMS`: checksums for both packages and the manifest.
 
-A failure before publication leaves a draft and reserved tag, not a new stable release. Inspect it and publish a new version after fixing the problem. Do not delete/move a published or reserved tag to rerun a release. No automated per-PR hosted preview is claimed; #2 tracks that work. Use disposable local installations until then.
+A failure before publication leaves a draft and reserved tag, not a new stable release. Inspect it and publish a new version after fixing the problem. Do not delete/move a published or reserved tag to rerun a release. Use the separate manual PR preview workflow for hosted acceptance; previews are not releases or tenant updates.
 
 ## Promote the reference installation
 
