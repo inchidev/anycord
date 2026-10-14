@@ -38,7 +38,7 @@ The initial `main` server accepts accounts registered on its installation. Newly
 | celld | One celld process/container, a D1-compatible application database, configurable S3/RustFS storage | The same membership model and WorkspaceHub separation, emulated locally |
 | TrailBase / PocketBase | Proposed: one backend database and configured file store per installation | Proposed: workspace-scoped records and equivalent authorization/realtime adapters |
 
-Cloudflare also has an installation-level auth/rate-limit Hub and a retained legacy ChatRoom class. Attachments use opaque object keys in shared storage; access is authorized through their channel/server and time-limited download grants. Creating a community does not provision a new Worker, D1 database or bucket. This is application-level isolation on shared installation resources, not a dedicated infrastructure boundary per community. Future engines must enforce the same contract; their adapters are not shipped yet.
+Cloudflare also has an installation-level auth/rate-limit Hub and a retained legacy ChatRoom class. Attachments use opaque object keys in shared storage; access is authorized through their channel/server and time-limited download grants. Creating a community does not provision a new Worker, D1 database or bucket. This is application-level isolation on shared installation resources, not a dedicated infrastructure boundary per community. See [data isolation and database-per-server alternatives](docs/data-isolation.md) for the current query checks and their limits. Future engines must enforce the same contract; their adapters are not shipped yet.
 
 ## Development
 

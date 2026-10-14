@@ -11,7 +11,7 @@ export default defineNuxtConfig({
     head: {
       title: 'Anycord · Chat on your terms',
       htmlAttrs: { lang: 'en' },
-      meta: [{ name: 'description', content: 'Chat, share files and connect to independent communities. Your people, your choice of server.' }],
+      meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content' }, { name: 'theme-color', content: '#1e1f22' }, { name: 'description', content: 'Chat, share files and connect to independent communities. Your people, your choice of server.' }],
       link: [{ rel: 'icon', href: '/favicon.png', type: 'image/png' }],
     },
   },

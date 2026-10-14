@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useMediaQuery } from '@vueuse/core'
 import type { Message } from '../../shared/contracts'
 const props = withDefaults(defineProps<{ message: Message; mine: boolean; canDelete: boolean; allowThread?: boolean; replyable?: boolean }>(), { allowThread: true, replyable: true })
 const emit = defineEmits<{ edit: [text: string, done: (success: boolean) => void]; delete: [done: (success: boolean) => void]; react: [emoji: string]; reply: []; quote: []; thread: []; jump: [id: string]; copyLink: [] }>()
+const isMobile = useMediaQuery('(max-width: 700px)'), mobileReactions = ref(false)
 let movedMenuFocus = false
 function menuFocus(event: Event) { if (movedMenuFocus) { event.preventDefault(); movedMenuFocus = false } }
 const editing = ref(false)
@@ -10,6 +12,7 @@ const deleting = ref(false)
 const editPending = ref(false), editError = ref('')
 const reactionOpen = ref(false), deletePending = ref(false), deleteError = ref('')
 const menu = computed(() => [
+  ...(isMobile.value ? [{ label: 'Add reaction', icon: 'i-lucide-smile-plus', onSelect: () => { movedMenuFocus = true; mobileReactions.value = true } }] : []),
   ...(props.replyable ? [{ label: 'Reply', icon: 'i-lucide-reply', onSelect: () => { movedMenuFocus = true; emit('reply') } }] : []),
   { label: 'Quote', icon: 'i-lucide-quote', onSelect: () => { movedMenuFocus = true; emit('quote') } },
   ...(props.allowThread && !props.message.threadId ? [{ label: props.message.thread ? 'Open Thread' : 'Create Thread', icon: 'i-lucide-messages-square', onSelect: () => { movedMenuFocus = true; emit('thread') } }] : []),
@@ -57,6 +60,7 @@ function save() {
       <UButton v-if="replyable" icon="i-lucide-reply" variant="ghost" color="neutral" aria-label="Reply to message" @click="emit('reply')" />
       <UDropdownMenu v-if="menu.length" :items="menu" :content="{ onCloseAutoFocus: menuFocus }"><UButton icon="i-lucide-ellipsis" variant="ghost" color="neutral" aria-label="Message actions" /></UDropdownMenu>
     </div>
+    <UModal v-model:open="mobileReactions" title="Add reaction" description="Choose an emoji for this message."><template #body><EmojiPicker @select="emit('react', $event); mobileReactions = false" /></template></UModal>
     <UModal v-model:open="deleting" title="Delete Message" description="This message will be permanently deleted."><template #body><p class="delete-preview">{{ message.text }}</p><UAlert v-if="deleteError" color="error" :title="deleteError" /></template><template #footer><UButton color="neutral" variant="ghost" :disabled="deletePending" @click="deleting = false">Cancel</UButton><UButton color="error" :loading="deletePending" @click="remove">Delete</UButton></template></UModal>
   </article>
 </template>

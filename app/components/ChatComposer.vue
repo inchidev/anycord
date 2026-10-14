@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const api = apiFor(), uploadFile = uploadFor()
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { useThrottleFn, useResizeObserver } from '@vueuse/core'
+import { useThrottleFn, useResizeObserver, useMediaQuery } from '@vueuse/core'
 import { MAX_ATTACHMENT_BYTES, type Message } from '../../shared/contracts'
 import { quoteMessage } from '../../shared/message-text'
 import { getApiTarget } from '../utils/connection'
@@ -25,6 +25,7 @@ watch(() => props.replyTo, (message) => {
     drafts.value[key.value] = { ...drafts.value[key.value], text: draft.value, reply: { id: message.id, author: message.author, text: message.text, channelId: message.channelId, threadId: message.threadId } }
   }
 })
+const isMobile = useMediaQuery('(max-width: 700px)')
 const surface = useTemplateRef<HTMLElement>('surface')
 function measure() {
   const box = surface.value?.querySelector('.composer-box')?.getBoundingClientRect()
@@ -105,7 +106,7 @@ function clearReply() {
   emit('clearReply')
 }
 function keydown(event: KeyboardEvent) {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit() }
+  if (!isMobile.value && event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit() }
   if (event.key === 'Escape' && activeReply.value) { event.stopPropagation(); clearReply() }
 }
 defineExpose({ focus, quote, measure })
@@ -123,6 +124,6 @@ defineExpose({ focus, quote, measure })
       <UPopover v-model:open="emojiOpen"><UButton icon="i-lucide-smile" color="neutral" variant="ghost" aria-label="Insert emoji" /><template #content><EmojiPicker @select="insertText" /></template></UPopover>
       <UButton v-if="draft.trim() || files.length" :disabled="uploading" type="submit" icon="i-lucide-send-horizontal" :loading="isPending" aria-label="Send message" />
     </div>
-    <div class="composer-status" role="status"><span v-if="send.isError.value" class="send-error">{{ apiError(send.error.value) }} <button type="button" @click="submit">Retry</button></span><span v-else-if="typing">{{ typing }}…</span><span v-else>Shift + Enter for a new line</span></div>
+    <div class="composer-status" :class="{ 'has-status': send.isError.value || typing }" role="status"><span v-if="send.isError.value" class="send-error">{{ apiError(send.error.value) }} <button type="button" @click="submit">Retry</button></span><span v-else-if="typing">{{ typing }}…</span><span v-else>Shift + Enter for a new line</span></div>
   </form>
 </template>

@@ -51,6 +51,12 @@ const typing = ref(''), threadTyping = ref('')
 const clearTyping = useDebounceFn(() => { typing.value = ''; threadTyping.value = '' }, 3000)
 const isMobile = useMediaQuery('(max-width: 700px)')
 const sidebar = useTemplateRef<HTMLElement>('sidebar')
+const navigation = useTemplateRef<HTMLElement>('navigation')
+const visualHeight = ref<number>(), visualTop = ref(0)
+function measureViewport() { visualHeight.value = isMobile.value ? window.visualViewport?.height : undefined; visualTop.value = isMobile.value ? window.visualViewport?.offsetTop || 0 : 0 }
+useEventListener(window.visualViewport, 'resize', measureViewport)
+useEventListener(window.visualViewport, 'scroll', measureViewport)
+watch(isMobile, measureViewport, { immediate: true })
 const liveMessageIds = new Set<string>()
 let lastFocusedMessage: string | undefined
 const timeline = useTemplateRef<HTMLElement>('timeline')
@@ -78,8 +84,15 @@ function resizeKey(event: KeyboardEvent) {
   const next = event.key === 'Home' ? 200 : event.key === 'End' ? sidebarMax.value : event.key === 'ArrowLeft' ? sidebarWidth.value - 10 : event.key === 'ArrowRight' ? sidebarWidth.value + 10 : undefined
   if (next !== undefined) { event.preventDefault(); savedSidebarWidth.value = Math.max(200, Math.min(sidebarMax.value, next)) }
 }
-function focusSearch() { searchInput.value?.querySelector('input')?.focus() }
-function closeSearch() { searchOpen.value = false; focusSearch() }
+const mobileSearchInput = useTemplateRef<HTMLElement>('mobileSearchInput')
+async function focusSearch() {
+  if (!isMobile.value) { searchInput.value?.querySelector('input')?.focus(); return }
+  threadTarget.value = null
+  if (threadId.value) await router.replace({ query: { ...route.query, thread: undefined } })
+  sidebarOpen.value = false; searchOpen.value = true
+  await nextTick(); mobileSearchInput.value?.querySelector('input')?.focus()
+}
+function closeSearch() { searchOpen.value = false; if (isMobile.value) document.querySelector<HTMLButtonElement>('.mobile-search')?.focus(); else void focusSearch() }
 function submitSearch() { if (search.value.trim()) { threadTarget.value = null; void router.replace({ query: { ...route.query, thread: undefined }, hash: '' }); searchOpen.value = true } }
 watch(workspaceId, () => { search.value = ''; debouncedSearch.value = ''; searchOpen.value = false })
 const debouncedSearch = ref('')
@@ -248,14 +261,19 @@ const serverMenu = computed(() => [
 ])
 useEventListener('keydown', (event: KeyboardEvent) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (!threadModalActive.value && !settingsOpen.value && !profileOpen.value) focusSearch() }
-  if (event.key === 'Escape' && !event.defaultPrevented) { sidebarOpen.value = false; searchOpen.value = false }
+  if (event.key === 'Escape' && !event.defaultPrevented) {
+    const overlay = document.activeElement?.closest('[role="dialog"], [role="alertdialog"], [role="menu"]')
+    if (!overlay || overlay === navigation.value) { sidebarOpen.value = false; if (searchOpen.value) closeSearch() }
+  }
   if (event.key === 'Tab' && isMobile.value && sidebarOpen.value && !document.activeElement?.closest('[role="menu"]')) {
-    const controls = sidebar.value?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), [tabindex="0"]')
+    const topDialog = document.activeElement?.closest('[role="dialog"]')
+    if (topDialog && topDialog !== navigation.value) return
+    const controls = navigation.value?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), [tabindex="0"]')
     const first = controls?.[0], last = controls?.[controls.length - 1]
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
-})
+}, { capture: true })
 useHead({ title: computed(() => `${channel.value ? '#' + channel.value.name + ' · ' : ''}${workspace.value?.name || 'Server'} · Anycord`) })
 function newDay(index: number) { return index === 0 || new Date(messages.value[index - 1]!.createdAt).toDateString() !== new Date(messages.value[index]!.createdAt).toDateString() }
 </script>
@@ -265,10 +283,12 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
     <div v-if="auth.isPending.value" class="boot-screen" role="status"><BrandMark /><p>Opening your server…</p></div>
     <div v-else-if="auth.isError.value" class="boot-screen"><UIcon name="i-lucide-wifi-off" class="size-10" /><h1>Can’t reach your server</h1><p>{{ target.origin || 'The local server' }} may still be starting.</p><UButton @click="auth.refetch()">Try Again</UButton><UButton color="neutral" variant="ghost" @click="connections.show()">Switch installation</UButton></div>
     <div v-else-if="!user" class="boot-screen"><BrandMark /><p>Opening login…</p></div>
-    <div v-else class="discord-shell" :style="{ '--sidebar-width': `${sidebarWidth}px`, '--composer-bottom': `${composerLayout.bottom}px`, '--composer-height': `${composerLayout.height}px` }">
+    <div v-else class="discord-shell" :style="{ '--visual-height': visualHeight ? `${visualHeight}px` : undefined, '--visual-top': `${visualTop}px`, '--sidebar-width': `${sidebarWidth}px`, '--composer-bottom': `${composerLayout.bottom}px`, '--composer-height': `${composerLayout.height}px` }">
       <div class="desktop-titlebar" :inert="threadModalActive"><NuxtLink class="rail-brand" to="/servers" aria-label="Your servers"><BrandMark /></NuxtLink><form ref="searchInput" class="global-search" role="search" @submit.prevent="submitSearch"><UInput v-model="search" :placeholder="`Search ${workspace?.name || 'this server'}`" aria-label="Search this server" icon="i-lucide-search" variant="none" class="w-full" @keydown.esc.stop="closeSearch" /><kbd>⌘ K</kbd></form></div>
       <div class="workspace-layout">
-        <nav class="server-rail" aria-label="Servers" :inert="threadModalActive">
+        <button v-if="sidebarOpen" class="sidebar-backdrop" aria-label="Close channels" @click="sidebarOpen = false" />
+        <div ref="navigation" class="workspace-navigation" :class="{ open: sidebarOpen }" :inert="threadModalActive || (isMobile && !sidebarOpen)" :role="isMobile && sidebarOpen ? 'dialog' : undefined" :aria-modal="isMobile && sidebarOpen ? true : undefined" aria-label="Servers and channels">
+        <nav class="server-rail" aria-label="Servers"><NuxtLink class="mobile-rail-brand" to="/servers" aria-label="Your servers"><BrandMark /></NuxtLink>
           <UTooltip :text="`${connections.label.value} · ${installationHost}`" :content="{ side: 'right' }"><button class="installation-group" :aria-label="`Manage connections: ${connections.label.value}`" @click="connections.show()"><span>{{ connections.label.value }}</span><UIcon name="i-lucide-chevron-down" /></button></UTooltip>
           <UTooltip v-for="space in serverList.data.value" :key="space.id" :text="space.name" :content="{ side: 'right' }"><button class="server-icon" :class="{ selected: workspaceId === space.id }" :aria-label="space.name" @click="selectWorkspace(space.id)">{{ space.initials }}</button></UTooltip>
           <template v-if="serverList.isPending.value"><USkeleton v-for="i in 2" :key="i" class="size-12 rounded-2xl" /></template>
@@ -278,9 +298,8 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
           <UTooltip v-for="item in connections.entries" :key="item.id" :text="item.name" :content="{ side: 'right' }"><button class="server-icon remote-icon" :class="{ selected: connections.active.value === item.id }" :aria-label="`Connect to ${item.name}`" @click="connections.select(item.id); router.push('/servers')">{{ item.name.slice(0, 2).toUpperCase() }}</button></UTooltip>
           </template>
         </nav>
-        <button v-if="sidebarOpen" class="sidebar-backdrop" aria-label="Close channels" @click="sidebarOpen = false" />
-        <aside ref="sidebar" class="channel-sidebar" :class="{ 'mobile-open': sidebarOpen }" :inert="(isMobile && !sidebarOpen) || (threadModalActive)" :role="isMobile && sidebarOpen ? 'dialog' : undefined" :aria-modal="isMobile && sidebarOpen ? true : undefined" aria-label="Channels">
-          <UDropdownMenu :items="serverMenu"><button class="server-heading"><strong>{{ workspace?.name || 'Your server' }}</strong><UIcon name="i-lucide-chevron-down" /></button></UDropdownMenu>
+        <aside ref="sidebar" class="channel-sidebar" :class="{ 'mobile-open': sidebarOpen }" aria-label="Channels">
+          <div class="channel-heading"><UDropdownMenu :items="serverMenu"><button class="server-heading"><strong>{{ workspace?.name || 'Your server' }}</strong><UIcon name="i-lucide-chevron-down" /></button></UDropdownMenu><UButton class="mobile-close-channels" icon="i-lucide-x" aria-label="Close server navigation" color="neutral" variant="ghost" @click="sidebarOpen = false" /></div>
           <div class="channel-scroll">
             <div class="channel-category"><span><UIcon name="i-lucide-chevron-down" /> TEXT CHANNELS</span><button v-if="workspace?.role === 'owner'" aria-label="Create text channel" @click="channelState.kind = 'text'; createError = ''; createOpen = true"><UIcon name="i-lucide-plus" /></button></div>
             <button v-for="item in channels.filter(c => c.kind === 'text')" :key="item.id" class="channel-link" :class="{ active: channelId === item.id, unread: unread[item.id] }" :aria-current="channelId === item.id ? 'page' : undefined" @click="selectChannel(item)"><UIcon name="i-lucide-hash" /><span class="channel-name">{{ item.name }}</span><b v-if="unread[item.id]">{{ unread[item.id] }}</b><UIcon v-else-if="channelId === item.id" name="i-lucide-users-round" class="channel-tail" /></button>
@@ -291,9 +310,10 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
           <div v-if="huddle" class="voice-connection"><button @click="huddleOpen = true"><UIcon name="i-lucide-audio-lines" /><span>Huddle open<small>{{ huddle.channel }}</small></span></button><UButton icon="i-lucide-phone-off" aria-label="Disconnect huddle" color="neutral" variant="ghost" @click="leaveHuddle" /></div>
           <div class="user-panel"><button class="user-profile" aria-label="Open your account" @click="profileOpen = true"><span class="avatar small" :style="{ background: user.color }"><span>{{ user.name.slice(0, 2).toUpperCase() }}</span><i :class="{ disconnected: wsStatus !== 'OPEN' }" /></span><span class="user-details"><strong>{{ user.name }}</strong><small>{{ wsStatus === 'OPEN' ? 'Online' : 'Connecting…' }}</small></span></button><div class="user-controls"><UTooltip :text="huddle ? 'Open microphone controls' : 'Microphone controls are available in a huddle'"><UButton icon="i-lucide-mic" variant="ghost" color="neutral" :disabled="!huddle" aria-label="Open microphone controls" @click="huddleOpen = true" /></UTooltip><UTooltip :text="huddle ? 'Open audio controls' : 'Audio controls are available in a huddle'"><UButton icon="i-lucide-headphones" variant="ghost" color="neutral" :disabled="!huddle" aria-label="Open audio controls" @click="huddleOpen = true" /></UTooltip><UTooltip text="User Settings"><UButton icon="i-lucide-settings" variant="ghost" color="neutral" aria-label="User Settings" @click="profileOpen = true" /></UTooltip></div></div>
         </aside>
+        </div>
         <div v-if="!isMobile" class="sidebar-resizer" role="separator" aria-label="Resize channel sidebar" aria-orientation="vertical" :aria-valuenow="sidebarWidth" :aria-valuemin="200" :aria-valuemax="sidebarMax" tabindex="0" :inert="threadModalActive" @pointerdown="resizeSidebar" @keydown="resizeKey" @dblclick="savedSidebarWidth = 240" />
-        <main class="chat-main" :inert="threadModalActive">
-          <header class="chat-header"><UButton class="mobile-menu" icon="i-lucide-menu" color="neutral" variant="ghost" aria-label="Open channels" @click="sidebarOpen = true" /><UIcon :name="channel?.kind === 'voice' ? 'i-lucide-volume-2' : 'i-lucide-hash'" class="header-hash" /><h1>{{ channel?.name || 'Your server' }}</h1><div class="header-divider" /><p class="channel-topic">{{ channel?.topic }}</p><div class="header-actions"><UTooltip text="Start a Huddle"><UButton icon="i-lucide-phone" variant="ghost" color="neutral" aria-label="Start a Huddle" :loading="join.isPending.value" :disabled="!channel" @click="startHuddle" /></UTooltip><UTooltip text="Members"><UButton icon="i-lucide-users-round" variant="ghost" color="neutral" aria-label="Toggle member list" :aria-pressed="narrowScreen ? memberDrawerOpen : membersVisible" @click="toggleMembers" /></UTooltip><UTooltip text="Threads"><UButton icon="i-lucide-messages-square" variant="ghost" color="neutral" aria-label="Browse threads" :disabled="channel?.kind !== 'text'" @click="threadsOpen = true" /></UTooltip></div></header>
+        <main class="chat-main" :inert="threadModalActive || (isMobile && sidebarOpen)">
+          <header class="chat-header"><UButton class="mobile-menu" icon="i-lucide-menu" color="neutral" variant="ghost" aria-label="Open channels" :aria-expanded="sidebarOpen" @click="sidebarOpen = true" /><UIcon :name="channel?.kind === 'voice' ? 'i-lucide-volume-2' : 'i-lucide-hash'" class="header-hash" /><h1>{{ channel?.name || 'Your server' }}</h1><div class="header-divider" /><p class="channel-topic">{{ channel?.topic }}</p><div class="header-actions"><UButton class="mobile-search" icon="i-lucide-search" color="neutral" variant="ghost" aria-label="Search messages" @click="focusSearch" /><UTooltip text="Start a Huddle"><UButton icon="i-lucide-phone" variant="ghost" color="neutral" aria-label="Start a Huddle" :loading="join.isPending.value" :disabled="!channel" @click="startHuddle" /></UTooltip><UTooltip text="Members"><UButton icon="i-lucide-users-round" variant="ghost" color="neutral" aria-label="Toggle member list" :aria-pressed="narrowScreen ? memberDrawerOpen : membersVisible" @click="toggleMembers" /></UTooltip><UTooltip text="Threads"><UButton icon="i-lucide-messages-square" variant="ghost" color="neutral" aria-label="Browse threads" :disabled="channel?.kind !== 'text'" @click="threadsOpen = true" /></UTooltip></div></header>
           <div v-if="!online || wsStatus !== 'OPEN'" class="connection-banner" role="status">{{ !online ? 'You’re offline. Saved messages remain visible.' : 'Reconnecting to live chat…' }}</div>
           <div v-if="bootstrap.isError.value" class="content-error"><UAlert color="error" :title="apiError(bootstrap.error.value)" /><UButton @click="bootstrap.refetch()">Retry</UButton></div>
           <template v-else-if="channel?.kind === 'voice'">
@@ -312,7 +332,7 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
         </main>
         <ThreadDraftPanel v-if="threadPanelActive && threadTarget" :key="`${user.id}:${threadTarget.id}`" :target="threadTarget" :user-id="user.id" :modal="narrowThread" @close="closeThread" @created="threadCreated" @layout="composerLayout = $event" />
         <ThreadPanel v-else-if="threadPanelActive && threadId" :workspace-id="workspaceId" :channel-id="channelId" :thread-id="threadId" :user="user" :owner="workspace?.role === 'owner'" :modal="narrowThread" :focus-id="focusedId" :typing="threadTyping" @close="closeThread" @jump="jumpToMessage($event, threadId)" @typing="liveTyping" @copy-link="copyMessageLink" @layout="composerLayout = $event" />
-        <aside v-if="searchOpen && !threadPanelActive" class="search-panel" aria-label="Search results"><header class="thread-header"><h2>Search results</h2><UButton icon="i-lucide-x" aria-label="Close search" variant="ghost" color="neutral" @click="closeSearch" /></header><div class="search-results"><p v-if="!debouncedSearch.trim()">Type a message to search for, then press Enter.</p><p v-else-if="search !== debouncedSearch || searchResults.isPending.value">Searching…</p><p v-else-if="searchResults.isError.value">Could not search. <button @click="searchResults.refetch()">Retry</button></p><template v-else><p>{{ searchResults.data.value?.length || 0 }} results for “{{ debouncedSearch }}”</p><button v-for="result in searchResults.data.value" :key="result.id" @click="router.push({ path: serverPath(workspaceId, result.channelId), query: { thread: result.threadId || undefined }, hash: `#message-${result.id}` }); searchOpen = false"><small>#{{ result.channel }} · {{ result.author }}</small><span>{{ result.text }}</span><b>Jump to message</b></button></template></div></aside>
+        <aside v-if="searchOpen && !threadPanelActive" class="search-panel" aria-label="Search results"><header class="thread-header"><h2>Search results</h2><UButton icon="i-lucide-x" aria-label="Close search" variant="ghost" color="neutral" @click="closeSearch" /></header><form v-if="isMobile" ref="mobileSearchInput" class="mobile-search-form" role="search" @submit.prevent="submitSearch"><UInput v-model="search" aria-label="Search this server" :placeholder="`Search ${workspace?.name || 'this server'}`" icon="i-lucide-search" class="w-full" @keydown.esc.stop="closeSearch" /></form><div class="search-results"><p v-if="!debouncedSearch.trim()">Type a message to search for, then press Enter.</p><p v-else-if="search !== debouncedSearch || searchResults.isPending.value">Searching…</p><p v-else-if="searchResults.isError.value">Could not search. <button @click="searchResults.refetch()">Retry</button></p><template v-else><p>{{ searchResults.data.value?.length || 0 }} results for “{{ debouncedSearch }}”</p><button v-for="result in searchResults.data.value" :key="result.id" @click="router.push({ path: serverPath(workspaceId, result.channelId), query: { thread: result.threadId || undefined }, hash: `#message-${result.id}` }); searchOpen = false"><small>#{{ result.channel }} · {{ result.author }}</small><span>{{ result.text }}</span><b>Jump to message</b></button></template></div></aside>
         <aside v-if="membersVisible && !threadPanelActive && !searchOpen" class="member-sidebar" aria-label="Server members"><div v-if="onlineMembers.length" class="member-section"><h2>ONLINE — {{ onlineMembers.length }}</h2><button v-for="member in onlineMembers" :key="member.id" class="member-row" @click="toast.add({ title: member.name, description: member.workspaceRole === 'owner' ? 'Server owner' : 'Server member' })"><span class="avatar small" :style="{ background: member.color }">{{ member.name.slice(0, 2).toUpperCase() }}<i /></span><span>{{ member.name }}</span><UIcon v-if="member.workspaceRole === 'owner'" name="i-lucide-crown" class="owner-crown" /></button></div><div v-if="offlineMembers.length" class="member-section offline-members"><h2>OFFLINE — {{ offlineMembers.length }}</h2><button v-for="member in offlineMembers" :key="member.id" class="member-row" @click="toast.add({ title: member.name, description: 'Offline' })"><span class="avatar small" :style="{ background: member.color }">{{ member.name.slice(0, 2).toUpperCase() }}<i /></span><span>{{ member.name }}</span></button></div><p v-if="!members.length" class="member-empty">Your server members will appear here.</p></aside>
       </div>
     </div>
