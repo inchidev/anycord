@@ -16,7 +16,8 @@ export default defineNuxtConfig({
       link: [{ rel: 'icon', href: '/favicon.png', type: 'image/png' }, { rel: 'manifest', href: '/manifest.webmanifest' }, { rel: 'apple-touch-icon', href: '/icons/apple-touch-icon.png' }],
     },
   },
-  nitro: { preset: 'static', prerender: { routes: ['/', '/login', '/servers'] } },
+  // One SPA fallback avoids static-directory redirects on celld's asset server.
+  nitro: { preset: 'static', prerender: { routes: ['/'], ignore: ['/login', '/servers'] } },
   typescript: { strict: true },
   vue: { compilerOptions: { isCustomElement: (tag) => tag.startsWith('rtk-') } },
 })
