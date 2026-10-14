@@ -1,6 +1,6 @@
 # Releases and recovery
 
-All source changes go through a PR to `main`. GitHub's required `check` job verifies the application. The Cloudflare main-branch build is verification-only: its deploy command is `node -e "console.log('Verification only; promote a published release explicitly')"`. Neither merging nor publishing updates tenant installations.
+All source changes go through a PR to `main`. GitHub's required `check` job verifies the application. Automatic Cloudflare PR previews are disabled until a maintainer-gated isolated preview flow is implemented in #2. GitHub requires approval for all external fork contributors. The Cloudflare main-branch build is verification-only: its deploy command is `node -e "console.log('Verification only; promote a published release explicitly')"`. Neither merging nor publishing updates tenant installations.
 
 ## Publish
 

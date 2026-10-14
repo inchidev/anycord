@@ -18,7 +18,7 @@ try {
     for (const [from, to] of [
       ['.output/public', '.output/public'], ['drizzle', 'drizzle'],
       ['shared/build-info.json', 'version.json'], ['DEPLOYMENT.md', 'DEPLOYMENT.md'],
-      ['docs/releases.md', 'RELEASES.md'],
+      ['docs/releases.md', 'RELEASES.md'], ['CHANGELOG.md', 'CHANGELOG.md'],
     ]) await cp(from, join(dir, to), { recursive: true })
     const config = JSON.parse(await readFile(engine === 'cloudflare' ? 'wrangler.cloudflare.jsonc' : 'wrangler.jsonc', 'utf8'))
     config.main = 'worker.js'; config.no_bundle = true

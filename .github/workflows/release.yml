@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           gh api "repos/$GH_REPO/immutable-releases" --jq '.enabled' | grep -qx true
-          node -e "require('fs').writeFileSync('release-notes.md', 'Versioned Cloudflare and celld packages built from commit ' + process.env.GITHUB_SHA + '.\\n\\nSee RELEASES.md inside the package for installation, backup and upgrade instructions.\\n')"
+          node -e "const fs=require('fs'); fs.writeFileSync('release-notes.md', fs.readFileSync('CHANGELOG.md','utf8') + '\\nSource commit: ' + process.env.GITHUB_SHA + '\\n')"
           gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/v$ANYCORD_RELEASE_VERSION" -f sha="$GITHUB_SHA"
           gh release create "v$ANYCORD_RELEASE_VERSION" --verify-tag --draft --title "Anycord $ANYCORD_RELEASE_VERSION" --generate-notes --notes-file release-notes.md
           gh release upload "v$ANYCORD_RELEASE_VERSION" release/*
