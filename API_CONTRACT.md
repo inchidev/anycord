@@ -96,6 +96,10 @@ Remote clients use `connectionLogin` instead of browser cookies. `authStatus` is
 
 `integrationsAiTest`: POST `/api/integrations/ai/test`, owner-only, returns `{ ok: true }` after a short completion using the encrypted saved OpenRouter key and saved model. It sends only a fixed diagnostic prompt (maximum 32 output tokens), never chat history, and does not create a chat message. Missing configuration returns 409; provider rejection/invalid response returns a sanitized 502. The provider may bill the small completion. The existing `integrationsTest` endpoint continues to check RealtimeKit credentials and preset. Both adapters share this behavior.
 
+## Release identity
+
+`GET /api/runtime` may additionally include `build: { version, commit, apiVersion, schema }`. Both shipped adapters include it; the optional field preserves API v1 compatibility with existing clients/adapters. `/api/health` includes the same build identity alongside the applied database schema. Public `/version.json` identifies the generated client. Release verification requires all three to agree. Clients check the runtime API version before mutations/uploads and refuse incompatible backends.
+
 ## Community access and recovery — 2026-10-15
 
 - `invites` / `inviteCreate`: GET / POST `/api/workspaces/:workspaceId/invites`. Owner-only; creation accepts `expiresInHours` (1–720, default 168) and `maxUses` (1–1000, default 25), returns 201 with a secret token shown once. Lists contain only IDs, timestamps and usage counts. `inviteRevoke` deletes only an invitation in the authorized workspace.

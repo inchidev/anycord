@@ -18,6 +18,18 @@ try {
   assert.equal(calls[0].url,'https://one.example/api/runtime');assert.equal(calls[0].headers.Authorization,'Bearer one');assert.equal(calls[0].credentials,'omit')
   assert.equal(calls[1].url,'https://two.example/api/runtime');assert.equal(calls[1].headers.Authorization,'Bearer two')
   setApiTarget({origin:'',token:''});await apiFor()('runtime');assert.equal(calls[2].credentials,'same-origin');assert.equal(calls[2].headers.Authorization,undefined)
+  const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+  const beforeOffline = calls.length
+  await assert.rejects(() => apiFor()('authLogin', { body: { name: 'alice', password: 'valid-test-password' } }), /offline/)
+  assert.equal(calls.length, beforeOffline, 'Offline mutations must not queue or reach the network')
+  if (savedNavigator) Object.defineProperty(globalThis, 'navigator', savedNavigator)
+  else delete globalThis.navigator
+  const normalFetch = globalThis.$fetch, incompatibleCalls = []
+  globalThis.$fetch = async (url) => { incompatibleCalls.push(url); return { apiVersion: 99 } }
+  await assert.rejects(() => apiFor({ origin: 'https://incompatible.example', token: 'test' })('authLogin', { body: { name: 'alice', password: 'valid-test-password' } }), /incompatible/)
+  assert.deepEqual(incompatibleCalls, ['https://incompatible.example/api/runtime'], 'Incompatible backend must receive no mutation')
+  globalThis.$fetch = normalFetch
   assert.notEqual(draftStoreKey('same-id','https://one.example'),draftStoreKey('same-id','https://two.example'))
   assert.equal(connectionOrigin('https://one.example/'),'https://one.example')
   for(const url of ['http://public.example','https://user:password@one.example','https://one.example/path','javascript:alert(1)'])assert.throws(()=>connectionOrigin(url))

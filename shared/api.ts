@@ -27,7 +27,7 @@ function endpoint(method: string, path: string, body: z.ZodType, response: z.Zod
 // The public wire contract, independent of D1, Durable Objects and backend SDKs.
 // Operational migration routes and Better Auth's native endpoints are not public app endpoints.
 export const endpoints = {
-  runtime: endpoint('GET', '/api/runtime', none, z.object({ apiVersion: z.literal(API_VERSION), engine: engineSchema, auth: z.literal('better-auth'), realtime: z.literal('websocket') })),
+  runtime: endpoint('GET', '/api/runtime', none, z.object({ apiVersion: z.literal(API_VERSION), engine: engineSchema, auth: z.literal('better-auth'), realtime: z.literal('websocket'), build: z.object({ version: z.string(), commit: z.string(), apiVersion: z.number().int(), schema: z.string() }).optional() })),
   authStatus: endpoint('GET', '/api/auth/status', none, z.object({ initialized: z.boolean(), setupRequired: z.boolean().default(false), user: userSchema.nullable() })),
   authRegister: endpoint('POST', '/api/auth/register', credentialsSchema, z.object({ user: userSchema })),
   authLogin: endpoint('POST', '/api/auth/login', credentialsSchema, z.object({ user: userSchema })),

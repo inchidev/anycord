@@ -2,7 +2,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import { connectionOrigin, setApiTarget } from '../utils/connection'
 type ConnectionView = 'manage' | 'choose' | 'create' | 'remote'
 type Connection = { id: string; origin: string; name: string }
-export default defineNuxtPlugin(() => {
+export default defineNuxtPlugin((nuxtApp) => {
   const entries = reactive<Connection[]>([]), active = ref('local'), revision = ref(0), open = ref(false)
   const view = ref<ConnectionView>('manage'), localName = ref('')
   const nativeName = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) ? 'This device' : location.hostname
@@ -49,11 +49,13 @@ export default defineNuxtPlugin(() => {
     apply(); revision.value++
   }
   function forgetToken() {
+    nuxtApp?.$clearDrafts?.(undefined, active.value === 'local' ? '' : active.value)
     tokens.delete(active.value)
     try { sessionStorage.removeItem(`anycord-session:${active.value}`) } catch {}
     apply(); revision.value++
   }
   function remove(id: string) {
+    nuxtApp?.$clearDrafts?.(undefined, id)
     const i = entries.findIndex(e => e.id === id); if (i >= 0) entries.splice(i, 1)
     tokens.delete(id); try { sessionStorage.removeItem(`anycord-session:${id}`) } catch {}
     if (active.value === id) select('local')

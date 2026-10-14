@@ -11,3 +11,6 @@ runtime
 worker-env.d.ts
 public/rtk
 .backups
+release
+output
+shared/build-info.json

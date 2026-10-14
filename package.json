@@ -1,11 +1,13 @@
 {
   "name": "celld-local-chat",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
+    "pretypecheck": "node scripts/write-build-info.mjs",
+    "prebuild": "node scripts/write-build-info.mjs",
     "dev": "nuxt dev",
-    "build": "node scripts/copy-realtimekit.mjs && nuxt generate && node scripts/bundle-migrations.mjs && node scripts/build-contract.mjs && node scripts/build-worker.mjs",
+    "build": "node scripts/copy-realtimekit.mjs && nuxt generate && node scripts/build-pwa.mjs && node scripts/bundle-migrations.mjs && node scripts/build-contract.mjs && node scripts/build-worker.mjs",
     "db:generate": "drizzle-kit generate && node scripts/bundle-migrations.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "typecheck": "nuxt typecheck && tsc -p tsconfig.worker.json",
@@ -18,8 +20,10 @@
     "test:connections": "node scripts/test-connections.mjs",
     "test:servers": "node scripts/test-server-list.mjs",
     "test:viewport": "node scripts/test-mobile-viewport.mjs",
-    "verify": "npm run typecheck && npm run test:contract && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && npm run build",
-    "prepare:cloudflare": "npm run build && node scripts/prepare-cloudflare-config.mjs"
+    "verify": "npm run typecheck && npm run test:contract && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && npm run build && npm run test:pwa",
+    "prepare:cloudflare": "npm run build && node scripts/prepare-cloudflare-config.mjs",
+    "release:package": "node scripts/package-release.mjs",
+    "test:pwa": "node scripts/test-pwa.mjs"
   },
   "dependencies": {
     "@cloudflare/realtimekit": "2.0.3",

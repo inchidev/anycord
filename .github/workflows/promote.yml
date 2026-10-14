@@ -1,0 +1,60 @@
+name: Promote production release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release tag (vX.Y.Z)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      CLOUDFLARE_ACCOUNT_ID: ee47884b4794b0240647bfa7a3e56c0b
+      ANYCORD_URL: https://anycord.inchi.dev
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check production credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+        run: test -n "$CLOUDFLARE_API_TOKEN" && test -n "$MIGRATION_TOKEN"
+      - name: Validate promotion and download immutable artifacts
+        run: |
+          set -euo pipefail
+          node -e "if(!/^v[0-9]+\\.[0-9]+\\.[0-9]+$/.test(process.env.RELEASE_TAG)) process.exit(1)"
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,isImmutable > release-metadata.json
+          node -e "const r=require('./release-metadata.json'); if(r.isDraft || r.isPrerelease || !r.isImmutable) throw Error('Only complete immutable stable releases can be promoted')"
+          gh release download "$RELEASE_TAG" --dir release --pattern 'anycord-*' --pattern SHA256SUMS
+          cd release
+          sha256sum --check SHA256SUMS
+          node -e "const m=require('./anycord-release.json'); if('v'+m.version!==process.env.RELEASE_TAG || m.format!==1) throw Error('Release manifest mismatch')"
+          mkdir extracted
+          tar -xzf "anycord-${RELEASE_TAG#v}-cloudflare.tar.gz" -C extracted
+      - run: npm ci
+      - name: Configure and deploy the published Worker
+        working-directory: release/extracted
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+        run: |
+          node configure.mjs ../../installation.json
+          ../../node_modules/.bin/wrangler deploy --config wrangler.jsonc
+          node verify-deployment.mjs

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { serverPath } from '../../shared/navigation'
-const route = useRoute(), { $connections: connections } = useNuxtApp()
+const route = useRoute(), { $connections: connections, $pwa: pwa } = useNuxtApp()
 const hosting = ref<'local' | 'cloud'>('local')
 useHead({ title: 'Anycord · Chat on your terms', meta: [{ name: 'description', content: 'A familiar place for your community. Chat, share files and connect to independent servers from one Anycord client.' }] })
 onMounted(() => {
@@ -16,6 +16,6 @@ onMounted(() => {
     </section>
     <section id="your-server" class="landing-hosting"><div><p class="landing-kicker">A HOME YOU CHOOSE</p><h2>Your community.<br />A server that suits you.</h2><p>Run Anycord on your own machine or open it in the cloud. Connect to another installation when your friends have their own.</p></div><div class="hosting-selector"><div class="hosting-tabs" role="tablist" aria-label="Hosting options"><button role="tab" :aria-selected="hosting === 'local'" :class="{ active: hosting === 'local' }" @click="hosting = 'local'"><UIcon name="i-lucide-monitor" />On your machine</button><button role="tab" :aria-selected="hosting === 'cloud'" :class="{ active: hosting === 'cloud' }" @click="hosting = 'cloud'"><UIcon name="i-lucide-cloud" />In the cloud</button></div><div class="hosting-detail" role="tabpanel"><UIcon :name="hosting === 'local' ? 'i-lucide-hard-drive' : 'i-lucide-globe'" /><h3>{{ hosting === 'local' ? 'A home on your own hardware.' : 'A home you can open anywhere.' }}</h3><p>{{ hosting === 'local' ? 'Self-host with Docker and keep your conversations and files in storage you control.' : 'Host on Cloudflare with Workers, D1 and R2. Open your account, choose a server, and start a conversation.' }}</p><NuxtLink :to="hosting === 'local' ? '/servers' : '/login'">{{ hosting === 'local' ? 'Open your connections' : 'Open Anycord' }} <UIcon name="i-lucide-arrow-right" /></NuxtLink></div></div></section>
     <section class="landing-features"><div><UIcon name="i-lucide-messages-square" /><h3>Room for the conversation.</h3><p>Channels, replies, reactions and threads keep things easy to follow.</p></div><div><UIcon name="i-lucide-paperclip" /><h3>More than a message.</h3><p>Share images and files, preview them in chat, and pick up where you left off.</p></div><div><UIcon name="i-lucide-plug" /><h3>Keep your communities close.</h3><p>Switch between independent installations with an account on each.</p></div></section>
-    <footer class="landing-footer"><BrandMark wordmark /><span class="landing-tagline">A place for your people.</span><NuxtLink to="/login">Log in <UIcon name="i-lucide-arrow-up-right" /></NuxtLink></footer>
+    <footer class="landing-footer"><BrandMark wordmark /><span class="landing-tagline">A place for your people.</span><UButton v-if="pwa.canInstall.value" variant="ghost" color="neutral" icon="i-lucide-download" @click="pwa.install()">Install Anycord</UButton><NuxtLink to="/login">Log in <UIcon name="i-lucide-arrow-up-right" /></NuxtLink></footer>
   </main>
 </template>

@@ -12,6 +12,7 @@ import { database, getMessages, getSetting, getThreads, requireChannel, requireM
 import { decrypt, digest, encrypt, equalSecret, HttpError, readBody } from './security'
 import { applyMigrations, seedDatabase } from './migrate'
 import migrations from './migrations.json'
+import buildInfo from '../shared/build-info.json'
 import { attachmentContent, cleanupAttachments, createAttachment, deleteAttachment, downloadAttachment, storageStatus, testStorage, updateStorage, uploadAttachment } from './storage'
 import { askAI, testAI, integrationStatus, leaveHuddle, realtimeRequest } from './services'
 
@@ -31,7 +32,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     return response
   }
   const endpoint = matchEndpoint(method, path)
-  if (endpoint?.name === 'runtime') return json({ apiVersion: API_VERSION, engine, auth: 'better-auth', realtime: 'websocket' })
+  if (endpoint?.name === 'runtime') return json({ apiVersion: API_VERSION, engine, auth: 'better-auth', realtime: 'websocket', build: buildInfo })
   if (path === '/api/_runtime') return json({ ok: true })
   if (path === '/api/_migrate' && method === 'POST') {
     if (!env.MIGRATION_TOKEN || !await equalSecret(request.headers.get('X-Migration-Token') || '', env.MIGRATION_TOKEN)) throw new HttpError(403, 'Migration access denied')
@@ -48,7 +49,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     try {
       const latest = await env.DB.prepare('SELECT name FROM app_migrations ORDER BY name DESC LIMIT 1').first<{ name: string }>()
       const ok = latest?.name === migrations.at(-1)?.name
-      return json({ ok, runtime: engine, storage: 'D1', schema: latest?.name || null }, ok ? 200 : 503)
+      return json({ ok, runtime: engine, storage: 'D1', schema: latest?.name || null, build: buildInfo }, ok ? 200 : 503)
     } catch { return json({ ok: false, message: 'Database migrations are starting' }, 503) }
   }
   const contentId = path.match(/^\/api\/attachments\/([a-f0-9-]+)\/content$/)?.[1]
