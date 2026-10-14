@@ -20,7 +20,7 @@ docker compose --env-file .env.storage -f compose.yml -f compose.rustfs.yml up -
 
 On macOS with Colima, set `DOCKER_CONTEXT=colima` for the setup command and pass `--context colima` to Docker. Open `http://127.0.0.1:9876/login`, create the first account, then choose a server. The first account owns the installation. Production deployments should set `AUTH_BASE_URL` to their HTTPS origin and keep RustFS on the internal network. Back up both `chat-state` and `rustfs-data`, including the application's encryption key.
 
-Better Auth owns username/password accounts and signed sessions. Passwords require at least ten characters. Email delivery and account recovery are not implemented yet. Optional service credentials stay encrypted on the installation.
+Better Auth owns username/password accounts and signed sessions. Passwords require at least ten characters, with confirmation during registration. Save recovery keys in User Settings → Recovery keys; `/recover` resets the password without email and revokes old sessions and keys. Email delivery is not implemented yet. Optional service credentials stay encrypted on the installation and are managed by its owner in User Settings → Installation Settings.
 
 ## Installations and servers
 
@@ -28,7 +28,7 @@ An **installation** has its own address, accounts, database and file storage. A 
 
 `/` is the product landing; `/login` is sign-in; `/servers` chooses a community; `/<serverId>/<channelId>` opens chat. The first server has the opaque ID `main`; additional servers receive UUIDs. Display names can change independently of IDs.
 
-The initial `main` server accepts accounts registered on its installation. Newly created servers currently belong only to their creator; invitations and membership management remain planned. Remote installations have independent identities/history. One installation is active per client tab; federation, shared global login and aggregate background notifications are not implemented.
+Only the installation owner can create new servers. The initial `main` server accepts accounts registered on its installation. Other servers belong to their creator until people join through server-scoped invitations. Server owners create/revoke links, set expiration and usage limits, remove members, ban them and remove bans in Server Settings. Custom roles and channel permissions are the next milestone in the [roadmap](docs/roadmap.md). Remote installations have independent identities/history. One installation is active per client tab; federation, shared global login and aggregate background notifications are not implemented.
 
 ## Resources and isolation
 

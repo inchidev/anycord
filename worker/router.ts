@@ -1,4 +1,6 @@
 import { z, ZodError } from 'zod'
+import { inviteTokenSchema, inviteInputSchema, recoveryResetSchema, passwordProofSchema } from '../shared/contracts'
+import { generateRecoveryKeys, resetWithRecoveryKey, randomToken, requireServerOwner, previewInvite, acceptInvite } from './access'
 import { and, eq, sql, desc } from 'drizzle-orm'
 import * as tables from '../db/schema'
 import { channelSchema, credentialsSchema, editMessageSchema, integrationSchema, messageSchema, reactionSchema, threadCreateSchema, workspaceSchema, workspaceUpdateSchema, channelUpdateSchema } from '../shared/contracts'
@@ -21,7 +23,13 @@ async function publish(env: Env, workspaceId: string, event: LiveEvent) {
 }
 async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare'): Promise<Response> {
   const url = new URL(request.url), path = url.pathname, method = request.method
-  if (!path.startsWith('/api/')) return env.ASSETS.fetch(request)
+  if (!path.startsWith('/api/')) {
+    const response = await env.ASSETS.fetch(request)
+    // celld's asset server can redirect generated page directories to a trailing
+    // slash and then return 404. Serve the SPA shell for extensionless routes.
+    if (engine === 'celld' && response.status === 404 && !path.split('/').filter(Boolean).at(-1)?.includes('.')) return env.ASSETS.fetch(new Request(new URL('/', request.url), request))
+    return response
+  }
   const endpoint = matchEndpoint(method, path)
   if (endpoint?.name === 'runtime') return json({ apiVersion: API_VERSION, engine, auth: 'better-auth', realtime: 'websocket' })
   if (path === '/api/_runtime') return json({ ok: true })
@@ -63,6 +71,18 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
   }
   if (endpoint) endpoint.spec.query.parse(Object.fromEntries(url.searchParams))
   const db = database(env)
+  if (endpoint?.name === 'invitePreview') {
+    const input = inviteTokenSchema.parse(await readBody(request))
+    if (!await hub(env, '_auth').consumeRate(`invite-preview:${request.headers.get('CF-Connecting-IP') || 'local'}`, 30)) throw new HttpError(429, 'Try again in a minute')
+    const invite = await previewInvite(env, input.token)
+    return json({ name: invite.name, initials: invite.initials })
+  }
+  if (endpoint?.name === 'recoveryReset') {
+    const input = recoveryResetSchema.parse(await readBody(request))
+    if (!await hub(env, '_auth').consumeRate(`recovery:${input.name.toLowerCase()}`, 5) || !await hub(env, '_auth').consumeRate(`recovery-ip:${request.headers.get('CF-Connecting-IP') || 'local'}`, 15)) throw new HttpError(429, 'Too many recovery attempts. Try again in a minute.')
+    await resetWithRecoveryKey(env, input.name, input.recoveryKey, input.password)
+    return json({ ok: true })
+  }
   if (endpoint?.name === 'authStatus') {
     const initialized = !!await db.select({ id: tables.users.id }).from(tables.users).where(eq(tables.users.role, 'owner')).get()
     if (request.headers.get('cookie')?.includes('cellcord_session=')) {
@@ -115,6 +135,45 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
   }
   const user = await requireUser(request, env)
   if (!['GET', 'HEAD'].includes(method) && !await hub(env, '_auth').consumeRate(`writes:${user.id}`, 90)) throw new HttpError(429, 'You are sending too quickly. Try again in a minute.')
+  if (endpoint?.name === 'recoveryStatus') {
+    const row = await env.DB.prepare('SELECT COUNT(*) AS count, MAX(created_at) AS generatedAt FROM recovery_keys WHERE user_id = ? AND claim_id IS NULL').bind(user.id).first()
+    return json(row)
+  }
+  if (endpoint?.name === 'recoveryGenerate') {
+    if (!await hub(env, '_auth').consumeRate(`recovery-generate:${user.id}`, 5)) throw new HttpError(429, 'Try again in a minute')
+    const input = passwordProofSchema.parse(await readBody(request))
+    return json({ keys: await generateRecoveryKeys(env, user.id, input.password) })
+  }
+  if (endpoint?.name === 'inviteAccept') {
+    const input = inviteTokenSchema.parse(await readBody(request))
+    const workspaceId = await acceptInvite(env, user.id, input.token)
+    await publish(env, workspaceId, { type: 'refresh' })
+    return json({ workspaceId })
+  }
+  if (endpoint && ['invites', 'inviteCreate', 'inviteRevoke', 'memberRemove', 'memberBan', 'memberUnban', 'bans'].includes(endpoint.name)) {
+    const workspaceId = endpoint.params.workspaceId!
+    await requireServerOwner(env, user.id, workspaceId)
+    if (endpoint.name === 'invites') return json(await db.select({ id: tables.invitations.id, createdAt: tables.invitations.createdAt, expiresAt: tables.invitations.expiresAt, maxUses: tables.invitations.maxUses, uses: tables.invitations.uses }).from(tables.invitations).where(eq(tables.invitations.workspaceId, workspaceId)).orderBy(desc(tables.invitations.createdAt)).all())
+    if (endpoint.name === 'inviteCreate') {
+      const input = inviteInputSchema.parse(await readBody(request))
+      const token = randomToken(), createdAt = Date.now(), id = crypto.randomUUID(), expiresAt = createdAt + input.expiresInHours * 3600_000
+      await db.insert(tables.invitations).values({ id, hash: await digest(token), workspaceId, createdBy: user.id, createdAt, expiresAt, maxUses: input.maxUses }).run()
+      return json({ id, token, createdAt, expiresAt, maxUses: input.maxUses, uses: 0 }, 201)
+    }
+    if (endpoint.name === 'inviteRevoke') {
+      await db.delete(tables.invitations).where(and(eq(tables.invitations.id, endpoint.params.inviteId!), eq(tables.invitations.workspaceId, workspaceId))).run()
+      return json({ ok: true })
+    }
+    if (endpoint.name === 'bans') return json(await db.select({ id: tables.users.id, name: tables.users.name, createdAt: tables.workspaceBans.createdAt }).from(tables.workspaceBans).innerJoin(tables.users, eq(tables.workspaceBans.userId, tables.users.id)).where(eq(tables.workspaceBans.workspaceId, workspaceId)).all())
+    if (endpoint.name === 'memberUnban') {
+      await db.delete(tables.workspaceBans).where(and(eq(tables.workspaceBans.workspaceId, workspaceId), eq(tables.workspaceBans.userId, endpoint.params.userId!))).run()
+      return json({ ok: true })
+    }
+    const removed = await hub(env, workspaceId).removeMember(workspaceId, user.id, endpoint.params.userId!, endpoint.name === 'memberBan')
+    if (!removed.ok) throw new HttpError(removed.status, removed.message)
+    await publish(env, workspaceId, { type: 'refresh' })
+    return json({ ok: true })
+  }
   if (endpoint?.name === 'liveTicket') {
     const authorization = request.headers.get('Authorization')
     if (!authorization?.startsWith('Bearer ') || !origin) throw new HttpError(400, 'Use a signed remote session with an origin')
@@ -143,6 +202,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare')
     return json({ user, workspaces: spaces, channels, members })
   }
   if (endpoint?.name === 'workspaceCreate') {
+    if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can create servers')
     const input = workspaceSchema.parse(await readBody(request))
     const id = crypto.randomUUID()
     await db.batch([

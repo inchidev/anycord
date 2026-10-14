@@ -12,6 +12,17 @@ export const workspaces = sqliteTable('workspaces', { id: text('id').primaryKey(
 export const memberships = sqliteTable('memberships', {
   userId: text('user_id').notNull().references(() => users.id), workspaceId: text('workspace_id').notNull().references(() => workspaces.id), role: text('role').notNull(),
 }, (t) => [primaryKey({ columns: [t.userId, t.workspaceId] })])
+export const invitations = sqliteTable('invitations', {
+  id: text('id').primaryKey(), hash: text('hash').notNull().unique(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  createdBy: text('created_by').notNull().references(() => users.id), createdAt: integer('created_at').notNull(), expiresAt: integer('expires_at').notNull(),
+  maxUses: integer('max_uses').notNull(), uses: integer('uses').notNull().default(0),
+}, t => [index('invitations_workspace').on(t.workspaceId)])
+export const workspaceBans = sqliteTable('workspace_bans', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id), userId: text('user_id').notNull().references(() => users.id), createdAt: integer('created_at').notNull(),
+}, t => [primaryKey({ columns: [t.workspaceId, t.userId] })])
+export const recoveryKeys = sqliteTable('recovery_keys', {
+  hash: text('hash').primaryKey(), userId: text('user_id').notNull().references(() => users.id), createdAt: integer('created_at').notNull(), claimId: text('claim_id'),
+}, t => [index('recovery_keys_user').on(t.userId)])
 export const channels = sqliteTable('channels', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
   name: text('name').notNull(), topic: text('topic').notNull().default(''), kind: text('kind').notNull().default('text'), position: integer('position').notNull().default(0),

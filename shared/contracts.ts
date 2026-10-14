@@ -6,6 +6,13 @@ export const credentialsSchema = z.object({
   setupCode: z.string().max(128).optional(),
   password: z.string().min(10, 'Use at least 10 characters').max(128),
 })
+export const registrationFormSchema = credentialsSchema.extend({ confirmPassword: z.string() }).refine(v => v.password === v.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] })
+export const passwordProofSchema = z.object({ password: z.string().min(1).max(128) })
+export const recoveryResetSchema = credentialsSchema.pick({ name: true, password: true }).extend({ recoveryKey: z.string().trim().min(1).max(128) })
+export const recoveryFormSchema = recoveryResetSchema.extend({ confirmPassword: z.string() }).refine(v => v.password === v.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] })
+export const inviteInputSchema = z.object({ expiresInHours: z.number().int().min(1).max(720).default(168), maxUses: z.number().int().min(1).max(1000).default(25) })
+export const inviteTokenSchema = z.object({ token: z.string().regex(/^[a-f0-9]{48}$/) })
+export const inviteResultSchema = z.object({ id: z.string(), createdAt: z.number(), expiresAt: z.number(), maxUses: z.number(), uses: z.number() })
 export const channelSchema = z.object({
   name: z.string().trim().min(1).max(40).regex(/^[a-z0-9-]+$/, 'Use lowercase letters, numbers, and hyphens'),
   topic: z.string().trim().max(200).default(''),
