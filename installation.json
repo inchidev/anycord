@@ -1,0 +1,9 @@
+{
+  "accountId": "ee47884b4794b0240647bfa7a3e56c0b",
+  "workerName": "anycord",
+  "databaseId": "bdcc0b49-ee61-44cc-a56c-b51ec98b93c1",
+  "databaseName": "anycord",
+  "bucketName": "anycord-files",
+  "origin": "https://anycord.inchi.dev",
+  "customDomain": true
+}

@@ -40,6 +40,12 @@ The initial `main` server accepts accounts registered on its installation. Newly
 
 Cloudflare also has an installation-level auth/rate-limit Hub and a retained legacy ChatRoom class. Attachments use opaque object keys in shared storage; access is authorized through their channel/server and time-limited download grants. Creating a community does not provision a new Worker, D1 database or bucket. This is application-level isolation on shared installation resources, not a dedicated infrastructure boundary per community. See [data isolation and database-per-server alternatives](docs/data-isolation.md) for the current query checks and their limits. Future engines must enforce the same contract; their adapters are not shipped yet.
 
+## Installed app and releases
+
+Install Anycord from the landing or server-picker page. The PWA provides an offline app shell, keeps account-scoped drafts and prompts before updating; conversations require connectivity. See [PWA behavior and platform verification](docs/pwa.md).
+
+Changes arrive through PRs to main. Published versions are immutable and production promotion is explicit; independent installations choose their own updates. See [contributing](CONTRIBUTING.md) and [release procedures](docs/releases.md).
+
 ## Development
 
 ```sh

@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 // Exercise the actual app-level draft plugin without a browser or DOM renderer.
 const folder = await mkdtemp(join(tmpdir(), 'anycord-drafts-'))
 const saved = new Map()
-Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) } })
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) } })
 try {
   const output = join(folder, 'plugin.mjs')
   await build({ stdin: { contents: "export { default } from './app/plugins/drafts.client'; export { effectScope } from 'vue'", resolveDir: process.cwd(), loader: 'ts' }, outfile: output, bundle: true, format: 'esm', platform: 'node', banner: { js: 'const defineNuxtPlugin = (plugin) => plugin;' } })
@@ -31,5 +31,20 @@ try {
   assert.equal(nextApp('alice')['new-thread:general:root'].threadDraft.createdId, 'server-thread')
   assert.equal(nextApp('alice')['new-thread:general:root'].threadDraft.completedId, 'server-thread')
   assert.equal(nextApp('alice')['new-thread:general:root'].attempt.id, '4c1eb927-6ebf-40ce-b7bc-0aa52e50fb0b')
+  const controls = plugin().provide
+  const loggedOut = controls.draftStore('alice', 'https://one.example')
+  loggedOut.general = { text: 'private draft to erase' }
+  controls.draftStore('bob', 'https://one.example').general = { text: 'another account' }
+  controls.draftStore('alice', 'https://two.example').general = { text: 'another installation' }
+  assert.equal(controls.persistDrafts(), true)
+  controls.clearDrafts('alice', 'https://one.example')
+  loggedOut.general = { text: 'stale composer must not resurrect persisted drafts' }
+  assert.deepEqual(Object.keys(plugin().provide.draftStore('alice', 'https://one.example')), [])
+  assert.equal(plugin().provide.draftStore('bob', 'https://one.example').general.text, 'another account')
+  assert.equal(plugin().provide.draftStore('alice', 'https://two.example').general.text, 'another installation')
+  const persist = localStorage.setItem
+  localStorage.setItem = () => { throw new Error('storage unavailable') }
+  assert.equal(controls.persistDrafts(), false, 'Updating must not reload when drafts cannot be saved')
+  localStorage.setItem = persist
   console.log('PASS: composers share an account-scoped draft store; delayed acknowledgement persists without clearing another conversation; another account sees no drafts.')
 } finally { await rm(folder, { recursive: true, force: true }); delete globalThis.localStorage }

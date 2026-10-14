@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/vue-query'
 import { apiFor } from '../utils/api'
 import { serverPath } from '../../shared/navigation'
-const api = apiFor(), { $connections: connections } = useNuxtApp()
+const api = apiFor(), { $connections: connections, $pwa: pwa } = useNuxtApp()
 const auth = useQuery({ queryKey: ['auth'], queryFn: () => api('authStatus'), retry: false })
 watch(() => auth.data.value, value => { if (value && !value.user) void navigateTo('/login?next=/servers', { replace: true }) }, { immediate: true })
 const bootstrap = useInstallationServers(() => auth.data.value?.user?.id)
@@ -19,6 +19,7 @@ const host = computed(() => connections.current.value?.origin || window.location
       <div v-else-if="bootstrap.isPending.value" class="server-picker-grid"><USkeleton v-for="i in 3" :key="i" class="h-32 rounded-xl" /></div>
       <div v-else class="server-picker-grid"><NuxtLink v-for="server in bootstrap.data.value" :key="server.id" :to="serverPath(server.id)" class="server-choice"><span class="server-choice-icon">{{ server.initials }}</span><strong>{{ server.name }}</strong><span>Open server <UIcon name="i-lucide-arrow-up-right" /></span></NuxtLink><button class="server-choice create-choice" @click="connections.show('create')"><UIcon name="i-lucide-plus" /><strong>Create a server</strong><span>A place for your people</span></button></div>
       <p class="picker-footnote">These servers share your account on {{ host }}. To open a different installation, add its address in Your connections and sign in there.</p>
+      <UButton v-if="pwa.canInstall.value" variant="ghost" color="neutral" icon="i-lucide-download" @click="pwa.install()">Install Anycord</UButton>
     </section>
 
   </main>

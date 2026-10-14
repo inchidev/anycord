@@ -95,3 +95,7 @@ Remote clients use `connectionLogin` instead of browser cookies. `authStatus` is
 ## Integration diagnostics
 
 `integrationsAiTest`: POST `/api/integrations/ai/test`, owner-only, returns `{ ok: true }` after a short completion using the encrypted saved OpenRouter key and saved model. It sends only a fixed diagnostic prompt (maximum 32 output tokens), never chat history, and does not create a chat message. Missing configuration returns 409; provider rejection/invalid response returns a sanitized 502. The provider may bill the small completion. The existing `integrationsTest` endpoint continues to check RealtimeKit credentials and preset. Both adapters share this behavior.
+
+## Release identity
+
+`GET /api/runtime` may additionally include `build: { version, commit, apiVersion, schema }`. Both shipped adapters include it; the optional field preserves API v1 compatibility with existing clients/adapters. `/api/health` includes the same build identity alongside the applied database schema. Public `/version.json` identifies the generated client. Release verification requires all three to agree. Clients check the runtime API version before mutations/uploads and refuse incompatible backends.

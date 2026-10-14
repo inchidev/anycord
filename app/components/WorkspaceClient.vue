@@ -11,11 +11,12 @@ import { receiveMessage } from '../data/messages'
 import { installMobileViewport, type ChatViewport } from '../utils/mobile-viewport'
 
 const api = apiFor()
-const { $connections: connections } = useNuxtApp()
+const { $connections: connections, $clearDrafts } = useNuxtApp()
 const target = getApiTarget()
 const route = useRoute(), router = useRouter(), toast = useToast(), queryClient = useQueryClient()
 const auth = useQuery({ queryKey: ['auth'], queryFn: () => api('authStatus'), retry: false })
 const user = computed(() => auth.data.value?.user)
+watch(user, (current, previous) => { if (!current && previous) $clearDrafts(previous.id, target.origin) })
 const serverList = useInstallationServers(() => user.value?.id)
 const installationOrigin = computed(() => target.origin || location.origin)
 const installationHost = computed(() => new URL(installationOrigin.value).host)
@@ -196,6 +197,7 @@ async function logout() {
   try {
     if (huddle.value) await leaveHuddle()
     await api('authLogout')
+    $clearDrafts(user.value?.id, target.origin)
     closeLive(); if (target.origin) connections.forgetToken(); else { queryClient.clear(); await auth.refetch() }; await router.replace('/login')
   } catch (cause) { showError(cause) }
 }

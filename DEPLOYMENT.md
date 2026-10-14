@@ -1,32 +1,14 @@
 # Deployment
 
-## Git and verification
+## Git, releases and production promotion
 
-The source repository is [inchidev/anycord](https://github.com/inchidev/anycord). GitHub Actions runs `npm ci` and `npm run verify` on pushes and pull requests, using Node.js 22. This workflow checks and builds the application; it does not deploy it.
+All changes go through PRs to protected `main`. GitHub Actions runs `npm ci` and `npm run verify`; the Cloudflare main-branch build verifies only and does not deploy. Merging and publishing do not update production or tenant installations.
 
-Existing production releases at `https://anycord.inchi.dev` were published directly with Wrangler. Cloudflare Workers Builds is connected to `inchidev/anycord`, with the production commands below. Pushes to `main` trigger verification, build, deployment and live checks. The first successful push deployment was commit `d8215e0` (Cloudflare build `36cebe3f-d21d-4f3e-a4ea-6a0b5788d1f3`, Worker version `c575e24f-7fb8-497e-a527-58b27e168f1f`). A successful GitHub check alone is not evidence of a production deployment; check the Workers build result too.
+Use **Publish release** to produce a new immutable stable version with prebuilt Cloudflare and celld packages, release notes and checksums. Then use **Promote production release** to deploy the exact published artifact to the existing reference installation. The promotion workflow needs the `production` environment secrets `CLOUDFLARE_API_TOKEN` and the existing `MIGRATION_TOKEN`; these are not automatically inherited from Cloudflare Workers Builds. See [release, installation and recovery procedures](docs/releases.md).
 
-## Connect Cloudflare Workers Builds
+The Workers Builds connection may stay on `main` with build command `npm run verify` and deploy command `node -e "console.log('Verification only; promote a published release explicitly')"`. Keep non-production deployment disabled until isolated previews (#2) exist. Never leave the previous auto-deploy command enabled when adopting this workflow.
 
-An organization administrator must grant the **Cloudflare Workers and Pages** GitHub App access to `inchidev/anycord`. Review the organization's installed apps at <https://github.com/organizations/inchidev/settings/installations>. Preserve access to unrelated repositories.
-
-In the existing `anycord` Worker's **Settings → Builds**, connect that repository and configure:
-
-| Setting | Value |
-| --- | --- |
-| Production branch | `main` |
-| Root directory | Repository root |
-| Build command | `npm run verify && node scripts/prepare-cloudflare-config.mjs` |
-| Deploy command | `npx wrangler deploy --config runtime/cloudflare/wrangler.jsonc && node scripts/verify-deployment.mjs` |
-| Non-production branch deploys | Disabled until isolated preview resources are configured |
-
-Use the existing Worker and bindings; creating a server inside Anycord does not require another deployment. Workers Builds installs dependencies. Configure an appropriately scoped build API token through Cloudflare and store the existing `MIGRATION_TOKEN` as a secret **build variable** as well as a runtime secret. The verification command applies application migrations when that variable is present, then checks the live schema, routes and logo asset.
-
-Keep the existing runtime `APP_SECRET`, `MIGRATION_TOKEN`, `SETUP_TOKEN` and `AUTH_BASE_URL`. Never replace production keys with development placeholders. Build variables and runtime Worker secrets are separate. Application migrations use the authenticated `/api/_migrate` endpoint; `wrangler d1 migrations apply` is not the application migration procedure.
-
-When setting up another installation, prove the entire path with a real commit: push → successful GitHub verification → successful Workers build/deploy → healthy production version → browser verification. Do not call Git deployment active before this succeeds.
-
-Official documentation: [GitHub integration](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/) and [Build configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/).
+Preserve existing runtime APP_SECRET, MIGRATION_TOKEN, SETUP_TOKEN and AUTH_BASE_URL. Build variables and runtime secrets are separate. Application migrations use the authenticated `/api/_migrate` endpoint; `wrangler d1 migrations apply` is not the application migration procedure. Check release identity and live behavior separately from CI success.
 
 ## Another Cloudflare installation
 

@@ -1,0 +1,44 @@
+name: Publish release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version (X.Y.Z); creates a new immutable tag
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ANYCORD_RELEASE_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22
+          cache: npm
+      - run: node scripts/check-release-input.mjs
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run release:package
+      - name: Publish complete release
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/immutable-releases" --jq '.enabled' | grep -qx true
+          node -e "require('fs').writeFileSync('release-notes.md', 'Versioned Cloudflare and celld packages built from commit ' + process.env.GITHUB_SHA + '.\\n\\nSee RELEASES.md inside the package for installation, backup and upgrade instructions.\\n')"
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/v$ANYCORD_RELEASE_VERSION" -f sha="$GITHUB_SHA"
+          gh release create "v$ANYCORD_RELEASE_VERSION" --verify-tag --draft --title "Anycord $ANYCORD_RELEASE_VERSION" --generate-notes --notes-file release-notes.md
+          gh release upload "v$ANYCORD_RELEASE_VERSION" release/*
+          gh release edit "v$ANYCORD_RELEASE_VERSION" --draft=false --latest

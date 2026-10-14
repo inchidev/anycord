@@ -17,3 +17,6 @@ DIRECTION.md
 VALIDATION.md
 dist
 .wrangler/
+shared/build-info.json
+release/
+.playwright-cli/

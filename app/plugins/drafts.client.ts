@@ -4,6 +4,18 @@ import { draftStateSchema, draftStoreKey, type DraftState } from '../../shared/d
 // One store and persistence watcher per account for the whole app, including unmounted composers.
 export default defineNuxtPlugin(() => {
   const stores = new Map<string, Record<string, DraftState>>()
+  const stops = new Map<string, () => void>()
+  function persistDrafts() {
+    try { for (const [key, store] of stores) localStorage.setItem(key, JSON.stringify(store)); return true } catch { return false }
+  }
+  function clearDrafts(userId?: string, scope = '') {
+    const prefix = userId ? draftStoreKey(userId, scope) : `anycord-message-drafts:${scope ? encodeURIComponent(scope) + ':' : ''}`
+    for (const key of stores.keys()) if (userId ? key === prefix : key.startsWith(prefix)) { stops.get(key)?.(); stops.delete(key); stores.delete(key) }
+    try {
+      if (userId) localStorage.removeItem(prefix)
+      else for (const key of Object.keys(localStorage)) if (scope && key.startsWith(prefix)) localStorage.removeItem(key)
+    } catch { /* Storage may be unavailable. In-memory data is still discarded. */ }
+  }
   function draftStore(userId: string, scope = '') {
     const key = draftStoreKey(userId, scope), existing = stores.get(key)
     if (existing) return existing
@@ -17,8 +29,10 @@ export default defineNuxtPlugin(() => {
     } catch { /* Storage may be unavailable; the in-memory draft still works. */ }
     const store = reactive(initial)
     stores.set(key, store)
-    effectScope(true).run(() => watch(store, () => { try { localStorage.setItem(key, JSON.stringify(store)) } catch { /* Keep draft in this tab. */ } }, { deep: true, flush: 'sync' }))
+    const scopeEffect = effectScope(true)
+    scopeEffect.run(() => watch(store, () => { try { localStorage.setItem(key, JSON.stringify(store)) } catch { /* Keep draft in this tab. */ } }, { deep: true, flush: 'sync' }))
+    stops.set(key, () => scopeEffect.stop())
     return store
   }
-  return { provide: { draftStore } }
+  return { provide: { draftStore, persistDrafts, clearDrafts } }
 })

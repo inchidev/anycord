@@ -49,6 +49,7 @@ watch(() => store[key]?.threadDraft?.completedId, (id) => {
   if (id && !disposed) { delete store[key]; emit('created', id) }
 }, { immediate: true, flush: 'post' })
 function submit() {
+  if (!navigator.onLine) return
   if (busy.value || !name.value.trim() || !text.value.trim()) return
   pending.value[pendingKey] = true
   send.mutate({ name: name.value.trim(), text: text.value.trim(), id: ensureDraft().threadDraft!.id })

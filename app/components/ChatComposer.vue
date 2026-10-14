@@ -37,6 +37,7 @@ const files = computed(() => drafts.value[key.value]?.attachments || [])
 const uploading = ref(false), uploadError = ref(''), pickerRevision = ref(0)
 async function addFiles(selected: File[] | File | null | undefined) {
   if (!selected || uploading.value || isPending.value) return
+  if (!navigator.onLine) { uploadError.value = 'Reconnect before attaching files.'; return }
   const list = Array.isArray(selected) ? selected : [selected]
   const context = key.value, owner = props.userId, channelId = props.channelId
   const store = $draftStore(owner, draftScope)
@@ -80,6 +81,7 @@ const send = useMutation({
   onSettled: (_data, _error, attempt) => { delete pending.value[attempt.pendingKey] },
 })
 function submit() {
+  if (!navigator.onLine) { toast.add({ title: 'You’re offline. Reconnect to send. Your draft is kept.', color: 'warning' }); return }
   if ((!draft.value.trim() && !files.value.length) || uploading.value || isPending.value || !props.channelId) return
   const input = { text: draft.value.trim(), channelId: props.channelId, threadId: props.threadId, replyToId: activeReply.value?.id, attachmentIds: files.value.map(f => f.id) }
   const attempt = prepareAttempt(drafts.value[key.value]?.attempt, input)
@@ -113,7 +115,7 @@ defineExpose({ focus, quote, measure })
 </script>
 
 <template>
-  <form ref="surface" class="message-composer" @submit.prevent="submit" @paste="paste" @dragover.prevent @drop.prevent="drop">
+  <form ref="surface" class="message-composer" :data-uploading="uploading" @submit.prevent="submit" @paste="paste" @dragover.prevent @drop.prevent="drop">
     <div v-if="activeReply" class="reply-composer"><span>Replying to <strong>{{ activeReply.author }}</strong><small>{{ activeReply.text }}</small></span><UButton icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Cancel reply" @click="clearReply" /></div>
     <div v-if="files.length" class="attachment-drafts"><div v-for="file in files" :key="file.id"><UIcon name="i-lucide-file" /><span>{{ file.name }}</span><UButton icon="i-lucide-x" variant="ghost" color="neutral" :aria-label="`Remove ${file.name}`" :disabled="isPending" @click="removeFile(file.id)" /></div></div>
     <p v-if="uploading" class="attachment-loading" role="status">Uploading file…</p><p v-if="uploadError" class="send-error" role="alert">{{ uploadError }}</p>
