@@ -24,5 +24,6 @@ assert.equal(runtime.apiVersion, expected.apiVersion)
 assert.deepEqual(runtime.build, expected)
 const version = await (await fetch(base + '/version.json', { cache: 'no-store' })).json()
 assert.deepEqual(version, expected, 'Client and Worker release differ')
-for (const path of ['/', '/login', '/servers', '/main/general', '/brand/anycord-symbol.png', '/manifest.webmanifest', '/sw.js']) assert((await fetch(base + path)).ok, path)
+for (const path of ['/', '/login', '/servers', '/invite', '/recover', '/main/general', '/brand/anycord-symbol.png', '/manifest.webmanifest', '/sw.js']) assert((await fetch(base + path)).ok, path)
 console.log('PASS: deployment schema, exact client/Worker version and source commit, routes and PWA assets.')
+

@@ -16,8 +16,8 @@ export default defineNuxtConfig({
       link: [{ rel: 'icon', href: '/favicon.png', type: 'image/png' }, { rel: 'manifest', href: '/manifest.webmanifest' }, { rel: 'apple-touch-icon', href: '/icons/apple-touch-icon.png' }],
     },
   },
-  // One SPA fallback avoids static-directory redirects on celld's asset server.
-  nitro: { preset: 'static', prerender: { routes: ['/'], ignore: ['/login', '/servers'] } },
+  // Keep all client routes on the generic SPA fallback for consistent cold starts.
+  nitro: { preset: 'static', prerender: { routes: ['/'], ignore: ['/login', '/servers', '/invite', '/recover'] } },
   typescript: { strict: true },
   vue: { compilerOptions: { isCustomElement: (tag) => tag.startsWith('rtk-') } },
 })

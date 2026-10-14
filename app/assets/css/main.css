@@ -141,8 +141,9 @@ button, a { touch-action: manipulation; }
   html.mobile-chat-viewport { height: 100%; overflow: hidden; overscroll-behavior: none; }
   body.mobile-chat-viewport { position: fixed; inset: 0; height: 100%; min-height: 0; overflow: hidden; overscroll-behavior: none; }
   body.mobile-chat-viewport #__nuxt, .workspace-client { height: 100%; min-height: 0; overflow: hidden; }
-  .discord-shell { position: absolute; top: var(--visual-top, 0px); left: 0; right: 0; height: var(--visual-height, 100dvh); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: var(--rail); }
-  .discord-shell.keyboard-open { padding-bottom: 0; }
+  .discord-shell { --mobile-safe-bottom: env(safe-area-inset-bottom, 0px); position: absolute; top: var(--visual-top, 0px); left: 0; right: 0; height: var(--visual-height, 100dvh); padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); background: var(--rail); }
+  .discord-shell.keyboard-open { --mobile-safe-bottom: 0px; }
+  html[data-input-modality="pointer"] :is(button, a, [role="button"]):focus { outline: none !important; }
   .desktop-titlebar { display: none; }
   .workspace-layout { min-width: 0; }
   .workspace-navigation { display: flex; position: absolute; top: 0; bottom: 0; left: 0; width: min(336px, calc(100% - 36px)); z-index: 40; background: var(--rail); visibility: hidden; transform: translateX(-105%); transition: transform .18s ease, visibility .18s; }
@@ -193,14 +194,14 @@ button, a { touch-action: manipulation; }
 @media (max-width: 700px) {
   .discord-shell, .workspace-layout { background: #2b2d31; }
   .workspace-navigation { width: 100%; background: #2b2d31; }
-  .workspace-navigation .server-rail { width: 70px; flex-basis: 70px; padding-top: 10px; gap: 10px; background: #2b2d31; }
+  .workspace-navigation .server-rail { width: 70px; flex-basis: 70px; padding-top: 10px; padding-bottom: calc(88px + var(--mobile-safe-bottom)); gap: 10px; background: #2b2d31; }
   .mobile-rail-brand { width: 48px; height: 48px; border-radius: 15px; background: #35373d; }
   .mobile-rail-brand img { width: 32px; height: 32px; }
   .mobile-rail-separator { display: block; width: 44px; min-height: 1px; background: #393b41; margin: 2px 0; }
   .workspace-navigation .installation-group { display: none; }
   .workspace-navigation .server-icon { width: 48px; height: 48px; min-height: 48px; border-radius: 16px; font-size: 19px; }
   .workspace-navigation .server-icon.selected::before { left: -11px; }
-  .workspace-navigation .channel-sidebar { background: #313338; border-radius: 24px 0 0 0; padding-bottom: 88px; }
+  .workspace-navigation .channel-sidebar { background: #313338; border-radius: 24px 0 0 0; padding-bottom: calc(88px + var(--mobile-safe-bottom)); }
   .channel-heading { flex-basis: 54px; border-top-left-radius: 24px; }
   .channel-heading .server-heading { height: 54px; box-shadow: none; padding: 0 16px; font-size: 20px; font-weight: 600; justify-content: flex-start; gap: 8px; }
   .server-heading > .iconify { width: 14px; height: 14px; }
@@ -217,7 +218,7 @@ button, a { touch-action: manipulation; }
   .channel-link.active { background: #45474f; }
   .channel-link > .channel-tail { display: none; }
   .voice-category { margin-top: 22px; }
-  .workspace-navigation .user-panel { left: 16px; bottom: 16px; width: calc(100% - 40px); height: 56px; border-radius: 16px; background: #383a43; padding: 4px 10px; box-shadow: 0 8px 24px #0002; }
+  .workspace-navigation .user-panel { left: 16px; bottom: calc(16px + var(--mobile-safe-bottom)); width: calc(100% - 40px); height: 56px; border-radius: 16px; background: #383a43; padding: 4px 10px; box-shadow: 0 8px 24px #0002; }
   .user-panel .avatar.small { width: 52px; height: 52px; min-width: 52px; font-size: 16px; margin-left: -4px; }
   .user-panel .avatar i { border-color: #383a43; width: 15px; height: 15px; }
   .user-profile { gap: 10px; }
@@ -247,7 +248,7 @@ button, a { touch-action: manipulation; }
   .date-divider { margin: 24px 12px 12px; color: #b5bac1; font-size: 12px; font-weight: 400; }
   .message-actions, .message-row:hover .message-actions { opacity: 0; pointer-events: none; }
   .message-row:focus-within .message-actions { opacity: 1; pointer-events: auto; }
-  .message-composer { padding: 8px 16px 16px; }
+  .message-composer { padding: 8px 16px calc(16px + var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px))); }
   .composer-box { min-height: 56px; border-radius: 18px; padding: 8px; gap: 4px; }
   .composer-box > button, .composer-box .attachment-picker button { width: 30px; height: 32px; padding: 5px; }
   .composer-box .composer-ai { display: none; }

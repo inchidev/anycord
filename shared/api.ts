@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { passwordProofSchema, recoveryResetSchema, inviteInputSchema, inviteTokenSchema, inviteResultSchema } from './contracts'
 import {
   attachmentInputSchema, attachmentSchema, storageInputSchema, storageStatusSchema, bootstrapSchema, channelSchema, credentialsSchema, editMessageSchema, idSchema, integrationSchema,
   integrationsSchema, messageResultSchema, messageSchema, reactionSchema, searchResultSchema, threadCreateSchema, threadSchema, userSchema, workspaceSchema, workspaceUpdateSchema, workspaceResultSchema, channelUpdateSchema, channelResultSchema,
@@ -31,6 +32,18 @@ export const endpoints = {
   authRegister: endpoint('POST', '/api/auth/register', credentialsSchema, z.object({ user: userSchema })),
   authLogin: endpoint('POST', '/api/auth/login', credentialsSchema, z.object({ user: userSchema })),
   authLogout: endpoint('POST', '/api/auth/logout', none, z.object({ success: z.literal(true) })),
+  recoveryStatus: endpoint('GET', '/api/account/recovery', none, z.object({ count: z.number().int(), generatedAt: z.number().nullable() })),
+  recoveryGenerate: endpoint('POST', '/api/account/recovery', passwordProofSchema, z.object({ keys: z.array(z.string()) })),
+  recoveryReset: endpoint('POST', '/api/recovery/reset', recoveryResetSchema, ok),
+  invitePreview: endpoint('POST', '/api/invitations/preview', inviteTokenSchema, z.object({ name: z.string(), initials: z.string() })),
+  inviteAccept: endpoint('POST', '/api/invitations/accept', inviteTokenSchema, z.object({ workspaceId: idSchema })),
+  invites: endpoint('GET', '/api/workspaces/:workspaceId/invites', none, z.array(inviteResultSchema)),
+  inviteCreate: endpoint('POST', '/api/workspaces/:workspaceId/invites', inviteInputSchema, inviteResultSchema.extend({ token: z.string() })),
+  inviteRevoke: endpoint('DELETE', '/api/workspaces/:workspaceId/invites/:inviteId', none, ok),
+  memberRemove: endpoint('DELETE', '/api/workspaces/:workspaceId/members/:userId', none, ok),
+  memberBan: endpoint('POST', '/api/workspaces/:workspaceId/bans/:userId', none, ok),
+  bans: endpoint('GET', '/api/workspaces/:workspaceId/bans', none, z.array(z.object({ id: idSchema, name: z.string(), createdAt: z.number() }))),
+  memberUnban: endpoint('DELETE', '/api/workspaces/:workspaceId/bans/:userId', none, ok),
   connectionLogin: endpoint('POST', '/api/connections/login', credentialsSchema, z.object({ token: z.string().min(1), user: userSchema })),
   liveTicket: endpoint('POST', '/api/workspaces/:workspaceId/live-ticket', none, z.object({ ticket: z.string().min(1) })),
   bootstrap: endpoint('GET', '/api/bootstrap', none, bootstrapSchema, z.object({ workspace: idSchema.optional() })),
