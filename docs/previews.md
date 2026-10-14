@@ -4,7 +4,7 @@ In GitHub Actions, run **PR preview** from **main**, enter the PR number, its ex
 
 Example: `gh workflow run preview.yml --ref main -f pr=16 -f sha=<reviewed-head-sha> -f operation=deploy`.
 
-The run summary and GitHub `preview` environment show `https://anycord-pr-16.ij69.workers.dev`. This URL is public; launching is restricted, viewing is not. Test data and separate test provider credentials only. Never enter production passwords, keys, bot tokens or customer data into a preview. A dedicated Telegram test bot can use this origin for OIDC/webhook/Mini App acceptance in #16. Connecting a bot changes that bot's webhook, so do not reuse the production bot.
+The PR's **PR preview** check links directly to `https://anycord-pr-16.ij69.workers.dev` and records its tested SHA; the run summary and GitHub `preview` environment also show it. Cleanup records a neutral removed check. This URL is public; launching is restricted, viewing is not. Test data and separate test provider credentials only. Never enter production passwords, keys, bot tokens or customer data into a preview. A dedicated Telegram test bot can use this origin for OIDC/webhook/Mini App acceptance in #16. Connecting a bot changes that bot's webhook, so do not reuse the production bot.
 
 ## Isolation
 

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { authorize, previewConfig, previewIdentity, previewSecrets, productionDatabase, repository, requireMaintainer, validatePull } from './preview-policy.mjs'
+import { waitForPreview } from './verify-preview.mjs'
 
 const sha = 'a'.repeat(40)
 const pull = { number: 16, state: 'open', base: { ref: 'main', repo: { full_name: repository } }, head: { sha } }
@@ -50,4 +51,29 @@ test('preview credentials are stable per PR, separate across purposes/PRs, with 
   assert(Object.values(one).every(v => /^[a-f0-9]{64}$/.test(v)))
   assert.notDeepEqual(one, previewSecrets(seed, 17))
   assert.throws(() => previewSecrets('', 16))
+})
+test('deployment waits for static assets even when the exact Worker is healthy', async () => {
+  const expected = { version: '0.3.0', commit: sha, apiVersion: 1, schema: '0007_cultured_toad_men' }
+  let rounds = 0
+  const request = async url => {
+    const path = new URL(url).pathname
+    if (path === '/api/health') { rounds++; return Response.json({ ok: true, schema: expected.schema, build: expected }) }
+    if (path === '/api/runtime') return Response.json({ engine: 'cloudflare', apiVersion: 1, build: expected })
+    if (path === '/version.json') return Response.json(expected)
+    if (path === '/manifest.webmanifest' && rounds === 1) return new Response('Propagating', { status: 503 })
+    return new Response('Ready')
+  }
+  await waitForPreview(previewIdentity(16).origin, expected, { request, sleep: async () => {}, attempts: 2 })
+  assert.equal(rounds, 2)
+})
+test('mixed client/Worker versions never pass preview readiness', async () => {
+  const expected = { version: '0.3.0', commit: sha, apiVersion: 1, schema: '0007_cultured_toad_men' }
+  const request = async url => {
+    const path = new URL(url).pathname
+    if (path === '/api/health') return Response.json({ ok: true, schema: expected.schema, build: expected })
+    if (path === '/api/runtime') return Response.json({ engine: 'cloudflare', apiVersion: 1, build: expected })
+    if (path === '/version.json') return Response.json({ ...expected, commit: 'b'.repeat(40) })
+    return new Response('Ready')
+  }
+  await assert.rejects(waitForPreview(previewIdentity(16).origin, expected, { request, sleep: async () => {}, attempts: 2 }), /did not become ready/)
 })
