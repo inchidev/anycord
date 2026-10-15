@@ -11,11 +11,11 @@ const error = ref('')
 const queryClient = useQueryClient()
 const integrations = useQuery({ queryKey: ['integrations'], queryFn: () => api('integrations'), enabled: computed(() => tab.value === 'integrations') })
 const database = useQuery({ queryKey: ['database'], queryFn: () => api('database'), enabled: computed(() => tab.value === 'database') })
-const state = reactive({ realtimeAccountId: '', realtimeAppId: '', realtimePreset: 'group_call_participant', realtimeToken: '', openrouterKey: '', aiModel: 'openai/gpt-4.1-mini' })
+const state = reactive({ realtimeAccountId: '', realtimeAppId: '', realtimePreset: 'group_call_participant', realtimeListenerPreset: '', realtimeToken: '', openrouterKey: '', aiModel: 'openai/gpt-4.1-mini' })
 watch(integrations.data, (data) => {
   if (!data) return
   state.realtimeAccountId = data.realtimeAccountId; state.realtimeAppId = data.realtimeAppId
-  state.realtimePreset = data.realtimePreset; state.aiModel = data.aiModel
+  state.realtimeListenerPreset = data.realtimeListenerPreset; state.realtimePreset = data.realtimePreset; state.aiModel = data.aiModel
 }, { immediate: true })
 const save = useMutation({
   mutationFn: () => api('integrationsUpdate', { body: { ...state, realtimeToken: state.realtimeToken || undefined, openrouterKey: state.openrouterKey || undefined } }),
@@ -49,6 +49,7 @@ watch(tab, () => { state.realtimeToken = ''; state.openrouterKey = ''; error.val
               <div class="integration-actions flex-wrap"><UButton to="https://dash.cloudflare.com/?to=/:account/realtime/kit" target="_blank" rel="noopener noreferrer" icon="i-lucide-external-link" color="neutral" variant="outline">Set up in Cloudflare</UButton><UButton to="https://developers.cloudflare.com/realtime/realtimekit/quickstart/" target="_blank" rel="noopener noreferrer" color="neutral" variant="link">Setup guide</UButton></div>
               <div class="field-grid"><UFormField name="realtimeAccountId" label="ACCOUNT ID"><UInput v-model="state.realtimeAccountId" :disabled="!owner" class="w-full" autocomplete="off" /></UFormField><UFormField name="realtimeAppId" label="APP ID"><UInput v-model="state.realtimeAppId" :disabled="!owner" class="w-full" autocomplete="off" /></UFormField></div>
               <UFormField name="realtimeToken" label="API TOKEN" description="Use a token with Realtime permissions for this account. Leave blank to keep a saved token."><UInput v-model="state.realtimeToken" type="password" :disabled="!owner" :placeholder="integrations.data.value?.realtimeConfigured ? 'Saved token — enter a replacement' : 'Paste your Cloudflare API token'" autocomplete="new-password" class="w-full" /></UFormField>
+              <UFormField name="realtimeListenerPreset" label="LISTENER PRESET" description="Optional. Must deny audio production and participant permission changes for listen-only members."><UInput v-model="state.realtimeListenerPreset" :disabled="!owner" class="w-full" /></UFormField>
               <UFormField name="realtimePreset" label="PARTICIPANT PRESET" description="Must match an existing participant preset in your RealtimeKit app."><UInput v-model="state.realtimePreset" :disabled="!owner" class="w-full" /></UFormField>
               <div v-if="owner" class="integration-actions flex-wrap"><UButton color="neutral" variant="outline" :disabled="!integrations.data.value?.realtimeConfigured" :loading="test.isPending.value" @click="error = ''; feedback = ''; test.mutate()">Test connection</UButton><UButton v-if="integrations.data.value?.realtimeConfigured" color="error" variant="ghost" @click="disconnect('realtimeToken')">Remove token</UButton></div>
               <hr />

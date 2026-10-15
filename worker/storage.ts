@@ -1,3 +1,4 @@
+import { canReadChannel, requirePermission } from './permissions'
 import { AwsClient } from 'aws4fetch'
 import { and, eq, isNull, lt } from 'drizzle-orm'
 import { attachments, storageConfigs } from '../db/schema'
@@ -83,6 +84,8 @@ export async function testStorage(env: Env) {
 }
 export async function createAttachment(env: Env, user: User, channelId: string, request: Request) {
   const input = attachmentInputSchema.parse(await readBody(request)), channel = await requireChannel(env, user, channelId)
+  await requirePermission(env, user.id, channel.workspaceId, 'attachments.upload', channelId)
+  await requirePermission(env, user.id, channel.workspaceId, 'messages.send', channelId)
   if (channel.kind !== 'text') throw new HttpError(400, 'Files belong in a text channel')
   const active = await activeConfig(env)
   if (!active) throw new HttpError(503, 'The installation owner needs to configure file storage')
@@ -109,6 +112,9 @@ function sniff(bytes: Uint8Array) {
 }
 export async function uploadAttachment(env: Env, user: User, id: string, request: Request) {
   const row = await requireAttachment(env, user, id)
+  const channel = await requireChannel(env, user, row.channelId)
+  await requirePermission(env, user.id, channel.workspaceId, 'attachments.upload', channel.id)
+  await requirePermission(env, user.id, channel.workspaceId, 'messages.send', channel.id)
   if (row.ownerId !== user.id || row.messageId || row.status !== 'pending') throw new HttpError(409, 'This attachment cannot be uploaded again')
   if (Number(request.headers.get('Content-Length')) > MAX_ATTACHMENT_BYTES) throw new HttpError(413, 'Files may be up to 8 MB')
   const reader = request.body?.getReader()
@@ -142,21 +148,23 @@ export async function deleteAttachment(env: Env, user: User, id: string) {
   await database(env).delete(attachments).where(and(eq(attachments.id, id), isNull(attachments.messageId))).run()
   return { ok: true }
 }
-async function signature(env: Env, id: string, expires: string) {
+async function signature(env: Env, id: string, expires: string, userId: string) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.APP_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-  return [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`attachment:${id}:${expires}`)))].map(v => v.toString(16).padStart(2, '0')).join('')
+  return [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`attachment:${id}:${expires}:${userId}`)))].map(v => v.toString(16).padStart(2, '0')).join('')
 }
 export async function downloadAttachment(env: Env, user: User, id: string) {
   const row = await requireAttachment(env, user, id)
   if (!row.messageId || row.status !== 'uploaded') throw new HttpError(404, 'Attachment not available')
+  if (!await canReadChannel(env, user.id, row.channelId)) throw new HttpError(403, 'You cannot read files in this channel')
   const expires = String(Date.now() + 5 * 60_000)
-  return { url: `/api/attachments/${encodeURIComponent(id)}/content?expires=${expires}&signature=${await signature(env, id, expires)}` }
+  return { url: `/api/attachments/${encodeURIComponent(id)}/content?expires=${expires}&user=${encodeURIComponent(user.id)}&signature=${await signature(env, id, expires, user.id)}` }
 }
 export async function attachmentContent(env: Env, id: string, request: Request) {
-  const url = new URL(request.url), expires = url.searchParams.get('expires') || '', sig = url.searchParams.get('signature') || ''
-  if (!/^\d{13}$/.test(expires) || Number(expires) < Date.now() || Number(expires) > Date.now() + 300_000 || !await equalSecret(sig, await signature(env, id, expires))) throw new HttpError(403, 'Download link expired')
+  const url = new URL(request.url), expires = url.searchParams.get('expires') || '', sig = url.searchParams.get('signature') || '', userId = url.searchParams.get('user') || ''
+  if (!/^\d{13}$/.test(expires) || Number(expires) < Date.now() || Number(expires) > Date.now() + 300_000 || !await equalSecret(sig, await signature(env, id, expires, userId))) throw new HttpError(403, 'Download link expired')
   const row = await database(env).select().from(attachments).where(eq(attachments.id, id)).get()
   if (!row?.messageId || row.status !== 'uploaded') throw new HttpError(404, 'Attachment not available')
+  if (!await canReadChannel(env, userId, row.channelId)) throw new HttpError(403, 'File access ended')
   const config = await loadConfig(env, row.storageId)
   let body: ReadableStream | null
   if (config.driver === 'r2') {

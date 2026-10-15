@@ -1,3 +1,4 @@
+import { initializeRoles } from './permissions'
 import migrations from './migrations.json'
 
 export async function applyMigrations(db: D1Database, target?: string) {
@@ -28,6 +29,10 @@ export async function seedDatabase(db: D1Database, legacy: { id: string; name: s
     db.prepare("INSERT OR IGNORE INTO channels (id, workspace_id, name, topic, kind, position) VALUES ('hangout', 'main', 'Hangout', 'Drop in for a live huddle.', 'voice', 3)"),
     db.prepare("INSERT OR IGNORE INTO messages (id, channel_id, author_id, text, created_at) VALUES ('welcome', 'general', 'system', 'Welcome to your server. This is the beginning of #general. Say hello, share a file, or start a thread to keep the conversation going.', ?)").bind(now),
   ])
+  if (await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'roles'").first()) {
+    const spaces = await db.prepare('SELECT id FROM workspaces').all<{ id: string }>()
+    for (const space of spaces.results) await initializeRoles({ DB: db }, space.id)
+  }
   const imported = await db.prepare("SELECT value FROM settings WHERE key = 'legacy_imported'").first()
   if (!imported) {
     for (const message of legacy) {
