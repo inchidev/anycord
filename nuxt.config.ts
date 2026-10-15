@@ -17,7 +17,7 @@ export default defineNuxtConfig({
     },
   },
   // Keep all client routes on the generic SPA fallback for consistent cold starts.
-  nitro: { preset: 'static', prerender: { routes: ['/'], ignore: ['/login', '/servers', '/invite', '/recover'] } },
+  nitro: { preset: 'static', prerender: { routes: ['/'], ignore: ['/login', '/servers', '/invite', '/join', '/recover'] } },
   typescript: { strict: true },
   vue: { compilerOptions: { isCustomElement: (tag) => tag.startsWith('rtk-') } },
 })

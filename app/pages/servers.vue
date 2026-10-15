@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
 import { serverPath } from '../../shared/navigation'
-const { $connections: connections, $pwa: pwa } = useNuxtApp()
+import { apiFor } from '../utils/api'
+import { getApiTarget } from '../utils/connection'
+const { $connections: connections, $pwa: pwa, $clearDrafts } = useNuxtApp()
+const target = getApiTarget(), api = apiFor(target), client = useQueryClient(), toast = useToast()
 const auth = useAuthSession()
 watch(() => auth.data.value, value => { if (value && !value.user) void navigateTo('/login?next=/servers', { replace: true }) }, { immediate: true })
 const bootstrap = useInstallationServers(() => auth.data.value?.user?.id)
@@ -9,6 +13,18 @@ const host = computed(() => connections.current.value?.origin || window.location
 const hostname = computed(() => new URL(host.value).host)
 const installationName = computed(() => connections.label.value === hostname.value ? 'This installation' : connections.label.value)
 const showSkeletons = ref(false)
+const settingsOpen = ref(false), settingsScope = ref<'account' | 'installation'>('account')
+function showSettings(scope: 'account' | 'installation') { settingsScope.value = scope; settingsOpen.value = true }
+async function logout() {
+  try {
+    await api('authLogout')
+    $clearDrafts(auth.data.value?.user?.id, target.origin)
+    settingsOpen.value = false
+    if (target.origin) connections.forgetToken()
+    else { client.clear(); await auth.refetch() }
+    await navigateTo('/login', { replace: true })
+  } catch (cause) { toast.add({ title: apiError(cause), color: 'error' }) }
+}
 let loadingTimer: ReturnType<typeof setTimeout> | undefined
 watch(() => bootstrap.isPending.value, pending => {
   clearTimeout(loadingTimer); showSkeletons.value = false
@@ -29,8 +45,11 @@ onBeforeUnmount(() => clearTimeout(loadingTimer))
         <ul v-if="bootstrap.data.value?.length" class="server-picker-list" aria-label="Your servers"><li v-for="server in bootstrap.data.value" :key="server.id"><NuxtLink :to="serverPath(server.id)" class="server-choice"><span class="server-choice-icon" aria-hidden="true">{{ server.initials }}</span><span class="server-choice-copy"><strong>{{ server.name }}</strong><small>Open server</small></span><UIcon name="i-lucide-chevron-right" class="server-choice-arrow" /></NuxtLink></li></ul>
         <div v-else class="picker-empty"><UIcon name="i-lucide-messages-square" /><h2>No servers yet</h2><p>{{ auth.data.value?.user?.role === 'owner' ? 'Create your first server to start a conversation.' : 'Ask a server owner for an invitation, or switch installation.' }}</p></div>
         <button v-if="auth.data.value?.user?.role === 'owner'" class="picker-create" @click="connections.show('create')"><span><UIcon name="i-lucide-plus" /></span>Create a server</button>
+        <NuxtLink to="/join" class="picker-create"><span><UIcon name="i-lucide-user-plus" /></span>Join a server</NuxtLink>
       </template>
       <footer class="picker-footer"><div v-if="auth.data.value?.user" class="picker-account"><UserAvatar class="picker-avatar" :name="auth.data.value.user.name" :color="auth.data.value.user.color" :src="auth.data.value.user.avatarUrl" /><span><strong>{{ auth.data.value.user.name }}</strong><small v-if="auth.data.value.user.telegram"><img src="/brand/telegram.svg" alt="" width="14" height="14" />Telegram account</small><small v-else>Signed in</small></span></div><UButton v-if="pwa.canInstall.value" variant="ghost" color="neutral" icon="i-lucide-download" @click="pwa.install()">Install Anycord</UButton></footer>
+      <div class="picker-settings"><UButton color="neutral" variant="ghost" icon="i-lucide-user-round" @click="showSettings('account')">User Settings</UButton><UButton v-if="auth.data.value?.user?.role === 'owner'" color="neutral" variant="ghost" icon="i-lucide-settings" @click="showSettings('installation')">Installation Settings</UButton></div>
     </section>
+    <UserSettings v-if="auth.data.value?.user" v-model:open="settingsOpen" :user="auth.data.value.user" :initial-scope="settingsScope" @logout="logout" />
   </main>
 </template>

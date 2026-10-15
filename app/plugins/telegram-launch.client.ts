@@ -1,4 +1,5 @@
 import type { MiniAppSession } from '../utils/telegram'
+import { pendingInvitationKey } from '../../shared/invitations'
 export default defineNuxtPlugin({
   name: 'telegram-launch',
   // Nuxt's router runs at pre (-20). Its hash normalization decodes the
@@ -7,6 +8,17 @@ export default defineNuxtPlugin({
   async setup() {
     const params = new URLSearchParams(window.location.hash.slice(1))
     const initData = window.Telegram?.WebApp?.initData || params.get('tgWebAppData') || ''
+    // Preserve invitation capabilities before stripping Telegram's signed hash.
+    // startapp=invite_<token> also opens the same explicit confirmation screen.
+    const start = new URLSearchParams(initData).get('start_param') || params.get('tgWebAppStartParam') || ''
+    const invitation = /^invite_([a-f0-9]{48})$/.exec(start)?.[1] || (location.pathname === '/invite' ? params.get('token') : '')
+    if (location.pathname === '/invite' && params.has('token')) {
+      try { sessionStorage.removeItem(pendingInvitationKey()) } catch {}
+    }
+    if (invitation && /^[a-f0-9]{48}$/.test(invitation)) {
+      try { sessionStorage.setItem(pendingInvitationKey(), invitation) } catch {}
+      if (initData) window.history.replaceState(window.history.state, '', '/invite')
+    }
     // Reloads (including a PWA update) have no signed fragment. Remember only
     // the UI context so those pages still receive Telegram's live safe areas.
     let miniApp = !!initData || !!window.Telegram?.WebApp || !!window.TelegramWebviewProxy
