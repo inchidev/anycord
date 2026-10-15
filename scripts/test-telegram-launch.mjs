@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { resolve, extname } from 'node:path'
 import { chromium } from 'playwright'
+import { invitationSettingsChecks } from './test-invitation-settings.mjs'
 
 // Exercise the generated Nuxt app, including its real router/plugin order.
 // Provider and app API responses use synthetic data; no real identity/token is used.
@@ -180,6 +181,7 @@ try {
     await context.close()
     console.log(`PASS ${mode}: existing sessions, failure fallback and installation policy remain usable`)
   }
+  await invitationSettingsChecks(browser, base, build, signed, launch, user)
   const context = await browser.newContext({ serviceWorkers: 'block' }), page = await context.newPage()
   let calls = 0
   await page.route('**/api/**', async route => {

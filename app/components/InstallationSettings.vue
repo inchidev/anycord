@@ -3,15 +3,14 @@ const api = apiFor()
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { integrationSchema } from '../../shared/contracts'
 import { apiFor } from '../utils/api'
-const open = defineModel<boolean>('open', { default: false })
+const props = defineProps<{ tab: 'authentication' | 'integrations' | 'storage' | 'database' }>()
+const tab = computed(() => props.tab)
 const owner = true
-const tab = ref('authentication')
-watch(open, value => { if (value) tab.value = 'authentication' })
 const feedback = ref('')
 const error = ref('')
 const queryClient = useQueryClient()
-const integrations = useQuery({ queryKey: ['integrations'], queryFn: () => api('integrations'), enabled: open })
-const database = useQuery({ queryKey: ['database'], queryFn: () => api('database'), enabled: computed(() => open.value && owner && tab.value === 'database') })
+const integrations = useQuery({ queryKey: ['integrations'], queryFn: () => api('integrations'), enabled: computed(() => tab.value === 'integrations') })
+const database = useQuery({ queryKey: ['database'], queryFn: () => api('database'), enabled: computed(() => tab.value === 'database') })
 const state = reactive({ realtimeAccountId: '', realtimeAppId: '', realtimePreset: 'group_call_participant', realtimeListenerPreset: '', realtimeToken: '', openrouterKey: '', aiModel: 'openai/gpt-4.1-mini' })
 watch(integrations.data, (data) => {
   if (!data) return
@@ -36,11 +35,9 @@ async function disconnect(provider: 'realtimeToken' | 'openrouterKey') {
     await queryClient.invalidateQueries({ queryKey: ['integrations'] }); feedback.value = 'API key removed.'
   } catch (cause) { error.value = apiError(cause) }
 }
-watch(open, (value) => { if (!value) { state.realtimeToken = ''; state.openrouterKey = ''; error.value = ''; feedback.value = '' } })
+watch(tab, () => { state.realtimeToken = ''; state.openrouterKey = ''; error.value = ''; feedback.value = '' })
 </script>
 <template>
-<SettingsFrame v-model:open="open" title="Installation Settings" label="INSTALLATION OWNER">
-<template #navigation><button :class="{ active: tab === 'authentication' }" @click="tab = 'authentication'"><UIcon name="i-lucide-shield-check" />Authentication</button><button :class="{ active: tab === 'integrations' }" @click="tab = 'integrations'"><UIcon name="i-lucide-plug" />Integrations</button><button :class="{ active: tab === 'storage' }" @click="tab = 'storage'"><UIcon name="i-lucide-hard-drive" />File storage</button><button :class="{ active: tab === 'database' }" @click="tab = 'database'"><UIcon name="i-lucide-database" />Database</button></template>
           <AuthenticationSettings v-if="tab === 'authentication'" />
           <template v-if="tab === 'integrations'">
             <h2>Integrations</h2><p class="section-description">Connect services for every community on this installation. Credentials stay encrypted on the installation.</p>
@@ -68,11 +65,10 @@ watch(open, (value) => { if (!value) { state.realtimeToken = ''; state.openroute
             </UForm>
             <div class="telegram-integration"><TelegramIntegration /></div>
           </template>
-          <div v-show="tab === 'storage'"><StorageSettings v-if="owner" /></div>
+          <div v-if="tab === 'storage'"><StorageSettings v-if="owner" /></div>
           <template v-if="tab === 'database'">
             <h2>Database</h2><p class="section-description">Storage and migration history for this installation.</p>
             <UAlert v-if="database.isError.value" color="error" title="Could not load database details" />
             <template v-if="database.data.value"><dl class="db-counts"><div v-for="(value, key) in database.data.value.counts" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div></dl><h3>Applied migrations</h3><ol class="migration-list"><li v-for="migration in database.data.value.migrations" :key="migration.name"><UIcon name="i-lucide-circle-check" /><span>{{ migration.name }}<small>{{ new Date(migration.appliedAt).toLocaleString() }}</small></span></li></ol><p class="section-description">The server applies its engine’s migrations before becoming healthy.</p><UButton color="neutral" variant="outline" @click="database.refetch()">Refresh</UButton></template>
           </template>
-</SettingsFrame>
 </template>

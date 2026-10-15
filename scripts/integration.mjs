@@ -132,7 +132,7 @@ try {
   await api('/api/auth/login', { method: 'POST', body: { name: 'alice', password: 'wrong-password' }, expected: 401 })
   await api('/api/bootstrap', { cookie: alice.cookie, headers: { Origin: 'https://example.com' }, expected: 403 })
   const html = await (await fetch(base)).text(); assert.match(html, /Anycord/); assert.match(html, /_nuxt/)
-  for (const path of ['/login', '/servers', '/invite', '/recover']) { const response = await fetch(base + path); assert.equal(response.status, 200, `Direct page navigation: ${path}`); assert.match(await response.text(), /_nuxt/) }
+  for (const path of ['/login', '/servers', '/invite', '/join', '/recover']) { const response = await fetch(base + path); assert.equal(response.status, 200, `Direct page navigation: ${path}`); assert.match(await response.text(), /_nuxt/) }
   const scripts = [...html.matchAll(/(?:src|href)="([^"]+\.js)"/g)].map((match) => match[1])
   for (const asset of scripts) assert.equal((await fetch(new URL(asset, base))).status, 200)
   const a = await connect(alice.cookie), b = await connect(bob.cookie)
