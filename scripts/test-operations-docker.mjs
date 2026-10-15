@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, writeFile, cp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { build } from 'esbuild'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -58,11 +58,18 @@ try {
   process.env.ANYCORD_IMAGE = baseImage
   await runCommand([...compose, 'up', '-d', 'files', 'backups'])
   const s3 = new AwsClient({ accessKeyId: access, secretAccessKey: secret, region: 'us-east-1', service: 's3' })
-  for (const bucket of ['source-files', 'target-files']) {
+  for (const bucket of ['source-files', 'target-files', 'integration-files']) {
     let response
     for (let i = 0; i < 120; i++) { try { response = await s3.fetch('http://127.0.0.1:19980/' + bucket, { method: 'PUT' }); if (response.ok || response.status === 409) break } catch {} await delay(500) }
     assert(response?.ok || response?.status === 409, 'Disposable RustFS bucket setup failed')
   }
+  // Run the complete core/roles/provider-contract suite against a disposable
+  // celld process and its own real S3 bucket inside this test's network.
+  const integration = await runCommand([...docker, 'run', '--rm', '--label', `com.docker.compose.project=${project}`, '--network', `${project}_default`,
+    '-e', 'STORAGE_ENDPOINT=http://files:9000', '-e', 'STORAGE_BUCKET=integration-files', '-e', 'STORAGE_REGION=us-east-1',
+    '-e', `STORAGE_ACCESS_KEY_ID=${access}`, '-e', `STORAGE_SECRET_ACCESS_KEY=${secret}`,
+    '-v', `${resolve('scripts')}:/app/scripts:ro`, '-v', `${resolve('drizzle')}:/app/drizzle:ro`, '-v', `${resolve('runtime/contracts.mjs')}:/app/contracts.mjs:ro`, baseImage, 'node', 'scripts/integration.mjs'])
+  for (const line of integration.stdout.split('\n').filter(line=>line.startsWith('PASS'))) console.log(line)
   const backupS3 = new AwsClient({accessKeyId:backupAccess,secretAccessKey:backupSecret,region:'us-east-1',service:'s3'})
   let backupBucketReady=false
   for(let i=0;i<120;i++){try{const r=await backupS3.fetch('http://127.0.0.1:19983/installation-backups',{method:'PUT'});if(r.ok||r.status===409){backupBucketReady=true;break}}catch{}await delay(500)}

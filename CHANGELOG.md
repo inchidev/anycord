@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.6.1 — 2026-10-15
+
+- Share scoped community invitations through Telegram Mini App, with native sharing and web fallback; preserve the intended installation through sign-in (#34).
+- Open channels and threads at the latest message, retain the reading position during live updates, and virtualize measured message rows. Add a return-to-latest control for scrollback and search results (#35).
+- Keep the RealtimeKit stage inside the huddle dialog, render participant tiles with the SDK flex layout, and keep microphone/device/disconnect controls reachable. Ignore late leave events from a disposed call.
+- Validate listen-only permissions through the provider's preset detail API. Require audio, video, screen sharing and permission changes to be denied. Open owner call configuration directly in Installation Settings → Integrations.
+- Exercise the full celld integration suite in the disposable S3/Docker recovery drill; cover real preset-list/detail contracts and recoverable SDK initialization errors on both mobile and desktop.
+
+### Upgrade
+
+API v1 and schema `0012_separate_s3_backups` are unchanged. Preserve the database, attachments, secrets and separate backup bucket. Calls require the installation owner's account/app IDs and a Cloudflare token with Realtime Admin permissions in Installation Settings → Integrations. A listen-only preset must deny all media production and participant permission changes.
+
+### Validation and limits
+
+The verification suite, generated-client app/Telegram checks and disposable celld/S3 backup/restore drill passed. Two isolated Chromium clients exchanged non-silent synthetic audio, camera video and a controlled browser-tab share through a real Cloudflare RealtimeKit SFU. Mute/unmute, input selection, active provider revocation, fresh-token rejoin and listener restrictions passed at 390/1280px. This media check used the candidate client, production authentication/permissions and short-lived participant tokens issued through the Cloudflare API; it does not prove an installation's saved provider credential or physical iOS/Android devices.
+
 ## 0.6.0 — 2026-10-15
 
 - Back up directly from the installation to an independently configured private S3-compatible bucket, without an always-on operator. Persist bounded progress in SQLite Durable Objects and resume through alarms after a restart.

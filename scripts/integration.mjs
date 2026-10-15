@@ -50,7 +50,9 @@ const provider = createServer(async (request, response) => {
   }
   assert.equal(request.headers.authorization, 'Bearer fake-test-token-never-send')
   let data = {}
-  if (request.url.endsWith('/presets')) data = [{ name: 'group_call_participant' }, { name: 'listener', permissions: { media: { audio: { can_produce: 'NOT_ALLOWED' } }, can_change_participant_permissions: false, can_accept_production_requests: false } }]
+  const providerPath = new URL(request.url, 'http://provider').pathname
+  if (providerPath.endsWith('/presets')) data = [{ id: '00000000-0000-4000-8000-000000000002', name: 'group_call_participant' }, { id: '00000000-0000-4000-8000-000000000001', name: 'listener' }]
+  else if (providerPath.endsWith('/presets/00000000-0000-4000-8000-000000000001')) data = { name: 'listener', permissions: { media: { audio: { can_produce: 'NOT_ALLOWED' }, video: { can_produce: 'NOT_ALLOWED' }, screenshare: { can_produce: 'NOT_ALLOWED' } }, can_change_participant_permissions: false, can_accept_production_requests: false } }
   else if (request.url.endsWith('/meetings')) { assert.equal(body.record_on_start, false); data = { id: crypto.randomUUID() } }
   else if (request.url.endsWith('/participants') && request.method === 'POST') { assert(['group_call_participant', 'listener'].includes(body.preset_name)); data = { id: crypto.randomUUID(), token: 'mock-participant-token' } }
   if (request.method === 'DELETE' && rejectParticipantRemoval) { response.statusCode = 502; response.end(JSON.stringify({ success: false })); return }

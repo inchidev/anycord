@@ -2,14 +2,14 @@
 import type { User, Channel } from '../../shared/contracts'
 import { getApiTarget } from '../utils/connection'
 const open = defineModel<boolean>('open', { default: false })
-const props = defineProps<{ user: User; channels?: Channel[]; initialScope?: 'account' | 'installation' }>()
+const props = defineProps<{ user: User; channels?: Channel[]; initialScope?: 'account' | 'installation'; initialInstallationTab?: 'authentication' | 'integrations' | 'storage' | 'database' | 'operations' }>()
 const emit = defineEmits<{ logout: [] }>()
 const host = new URL(getApiTarget().origin || window.location.origin).host
 const scope = ref<'account' | 'installation'>('account')
 const tab = ref('account')
 const installationTab = ref<'authentication' | 'integrations' | 'storage' | 'database' | 'operations'>('authentication')
 watch(open, value => {
-  if (value) { scope.value = props.user.role === 'owner' && props.initialScope === 'installation' ? 'installation' : 'account'; tab.value = 'account'; installationTab.value = 'authentication' }
+  if (value) { scope.value = props.user.role === 'owner' && props.initialScope === 'installation' ? 'installation' : 'account'; tab.value = 'account'; installationTab.value = props.initialInstallationTab || 'authentication' }
 }, { immediate: true })
 </script>
 <template>

@@ -87,6 +87,11 @@ export async function checkRoles({ api, connect, owner, base, fetch: requestFetc
     await api(`${channelPath}/huddle`, { cookie: guest.cookie, method: 'POST', expected: 409 })
     const settings = (await api('/api/integrations', asOwner)).data
     await api('/api/integrations', { ...asOwner, method: 'PUT', body: { ...settings, realtimeListenerPreset: 'listener' } })
+    if(voice.listenerMedia){
+      voice.listenerMedia('ALLOWED');await api(`${channelPath}/huddle`, { cookie: guest.cookie, method: 'POST', expected:409 })
+      voice.listenerMedia('CAN_REQUEST');await api(`${channelPath}/huddle`, { cookie: guest.cookie, method: 'POST', expected:409 })
+      voice.listenerMedia('NOT_ALLOWED')
+    }
     await api(`${channelPath}/huddle`, { cookie: guest.cookie, method: 'POST' })
     assert.equal(voice.calls.findLast(call => call.method === 'POST' && call.url.endsWith('/participants')).body.preset_name, 'listener')
     voice.rejectRemoval(true)

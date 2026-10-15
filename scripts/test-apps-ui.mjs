@@ -21,7 +21,7 @@ try {
   for (const width of [1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: 'block' }), page = await context.newPage()
     const user = { id: 'owner', name: 'Owner', role: 'owner', color: '#5865f2' }, errors = [], apps = [], posts = [], hooks = []
-    let failNext = false
+    let failNext = false, voiceCleanups = 0
     let policy = { enabled: true, allowedOrigins: [] }
     page.on('pageerror', error => errors.push(error.message))
     await page.addInitScript(() => { delete Navigator.prototype.serviceWorker })
@@ -31,7 +31,9 @@ try {
       let body = {}, status = 200
       if (path === '/api/runtime') body = { apiVersion: 1, engine: 'cloudflare', auth: 'better-auth', realtime: 'websocket', build }
       else if (path === '/api/auth/status') body = { initialized: true, user }
-      else if (path === '/api/bootstrap') body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'owner', permissions: permissionKeys }], channels: [{ id: 'general', workspaceId: 'main', name: 'general', kind: 'text', topic: '', permissions: permissionKeys }], members: [] }
+      else if (path === '/api/bootstrap') body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'owner', permissions: permissionKeys }], channels: [{ id: 'general', workspaceId: 'main', name: 'general', kind: 'text', topic: '', permissions: permissionKeys }, { id: 'hangout', workspaceId: 'main', name: 'hangout', kind: 'voice', topic: '', permissions: permissionKeys }], members: [] }
+      else if (path === '/api/channels/hangout/huddle' && method === 'POST') body = { authToken: 'invalid-qa-token', participantId: crypto.randomUUID(), meetingId: crypto.randomUUID() }
+      else if (path.startsWith('/api/channels/hangout/huddle/') && method === 'DELETE') { voiceCleanups++; body = { ok: true } }
       else if (path === '/api/integrations') body = { realtimeConfigured: false, realtimeAccountId: '', realtimeAppId: '', realtimePreset: 'group_call_participant', aiConfigured: false, aiModel: 'test', email: 'later' }
       else if (path === '/api/integrations/telegram') body = { botConfigured: false, botUsername: '', clientId: '', oidcConfigured: false, notifications: false, origin: base, callbackURL: base + '/callback', miniAppURL: base, webhookURL: base + '/webhook' }
       else if (path === '/api/installation/authentication') body = { passwordLogin: true, registration: true, telegramLogin: false, miniAppLogin: false }
@@ -139,6 +141,21 @@ try {
     await page.getByRole('button', { name: 'Save app policy', exact: true }).click()
     await page.getByText('App policy saved. Pending deliveries were cancelled.', { exact: true }).waitFor()
     assert.deepEqual(policy, { enabled: false, allowedOrigins: ['https://hooks.example.com'] })
+    assert.deepEqual(errors, [])
+    await page.goto(base + '/main/hangout')
+    await page.getByRole('button', { name: 'Configure Cloudflare RealtimeKit', exact: true }).click()
+    await page.getByRole('heading', { name: 'Calls & huddles', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Close settings', exact: true }).click()
+    await page.getByRole('button', { name: 'Join Huddle', exact: true }).click()
+    await page.getByText('Could not initialize the huddle. Check microphone permissions and the RealtimeKit participant preset.', { exact: true }).waitFor()
+    await page.locator('rtk-meeting.hydrated').waitFor()
+    assert.equal(await page.locator('rtk-meeting').getAttribute('mode'), 'fill')
+    assert.equal(await page.locator('rtk-meeting').evaluate(el => getComputedStyle(el).display), 'flex', 'The SDK stage needs its flex layout to render participant tiles and keep the control menu inside the panel')
+    await page.locator('.huddle-panel').getByRole('button', { name: 'Disconnect', exact: true }).click()
+    await page.locator('.huddle-panel').waitFor({ state: 'detached' })
+    assert.equal(voiceCleanups, 1, 'Failed SDK initialization must still release the backend participant')
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false)
+    console.log(`PASS ${width}px: real RealtimeKit UI hydration stays inside the huddle panel; initialization error remains recoverable and Disconnect performs participant cleanup`)
     assert.deepEqual(errors, [])
     await context.close()
     console.log(`PASS ${width}px: generated client app install/configure/rotate/disable/uninstall, permissions, slash command discovery/send, errors and draft retention`)
