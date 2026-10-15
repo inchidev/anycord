@@ -10,7 +10,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { AwsClient } from 'aws4fetch'
 import WebSocket from 'ws'
-import { operationClient, createBackup, restoreBackup, verifyInstallation, runCommand } from '../operations/core.mjs'
+import { operationClient, createBackup, restoreBackup, verifyInstallation, runCommand, downloadS3Backup } from '../operations/core.mjs'
 import { activateCelld } from '../operations/activate.mjs'
 
 const root = await mkdtemp(join(tmpdir(), 'anycord-docker-drill-'))
@@ -21,6 +21,7 @@ const composeFile = join(root, 'compose.json'), compose = [...docker, 'compose',
 const oldBuild = JSON.parse(await readFile('shared/build-info.json', 'utf8')), parts = oldBuild.version.split('.').map(Number); parts[2]++
 const nextBuild = { ...oldBuild, version: parts.join('.'), commit: '4'.repeat(40) }
 const baseImage = `anycord-drill:${project}`, updatedImage = `anycord:${nextBuild.version}-${nextBuild.commit.slice(0, 12)}`
+const backupAccess = 'backup' + randomBytes(8).toString('hex'), backupSecret = randomBytes(32).toString('hex')
 const access = 'drill' + randomBytes(8).toString('hex'), secret = randomBytes(32).toString('hex')
 const sourceOrigin = 'http://127.0.0.1:19981', targetOrigin = 'http://127.0.0.1:19982'
 let clients = []
@@ -52,15 +53,20 @@ try {
   await writeFile(composeFile, JSON.stringify({ services: {
     source: chat(19981, 'source-state', 'source-files'), target: chat(19982, 'target-state', 'target-files'),
     files: { image: 'rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c', command: '/data', environment: { RUSTFS_ACCESS_KEY: access, RUSTFS_SECRET_KEY: secret, RUSTFS_ADDRESS: ':9000', RUSTFS_CONSOLE_ENABLE: 'false', RUSTFS_OBS_LOGGER_LEVEL: 'error' }, ports: ['127.0.0.1:19980:9000'], volumes: ['files-state:/data'], mem_limit: '1g' },
-  }, volumes: { 'source-state': {}, 'target-state': {}, 'files-state': {} } }), { mode: 0o600 })
+    backups: { image: 'rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c', command: '/data', environment: { RUSTFS_ACCESS_KEY: backupAccess, RUSTFS_SECRET_KEY: backupSecret, RUSTFS_ADDRESS: ':9000', RUSTFS_CONSOLE_ENABLE: 'false', RUSTFS_OBS_LOGGER_LEVEL: 'error' }, ports: ['127.0.0.1:19983:9000'], volumes: ['backups-state:/data'], mem_limit: '1g' },
+  }, volumes: { 'backups-state': {}, 'source-state': {}, 'target-state': {}, 'files-state': {} } }), { mode: 0o600 })
   process.env.ANYCORD_IMAGE = baseImage
-  await runCommand([...compose, 'up', '-d', 'files'])
+  await runCommand([...compose, 'up', '-d', 'files', 'backups'])
   const s3 = new AwsClient({ accessKeyId: access, secretAccessKey: secret, region: 'us-east-1', service: 's3' })
   for (const bucket of ['source-files', 'target-files']) {
     let response
     for (let i = 0; i < 120; i++) { try { response = await s3.fetch('http://127.0.0.1:19980/' + bucket, { method: 'PUT' }); if (response.ok || response.status === 409) break } catch {} await delay(500) }
     assert(response?.ok || response?.status === 409, 'Disposable RustFS bucket setup failed')
   }
+  const backupS3 = new AwsClient({accessKeyId:backupAccess,secretAccessKey:backupSecret,region:'us-east-1',service:'s3'})
+  let backupBucketReady=false
+  for(let i=0;i<120;i++){try{const r=await backupS3.fetch('http://127.0.0.1:19983/installation-backups',{method:'PUT'});if(r.ok||r.status===409){backupBucketReady=true;break}}catch{}await delay(500)}
+  assert(backupBucketReady,'Disposable backup RustFS bucket setup failed')
   await runCommand([...compose, 'up', '-d', 'source', 'target']); await Promise.all([ready(sourceOrigin), ready(targetOrigin)])
   process.env.ANYCORD_DOCKER_SOURCE_TOKEN = await token('source'); process.env.ANYCORD_DOCKER_TARGET_TOKEN = await token('target')
   const source = operationClient({ origin: sourceOrigin, migrationTokenEnv: 'ANYCORD_DOCKER_SOURCE_TOKEN' }), target = operationClient({ origin: targetOrigin, migrationTokenEnv: 'ANYCORD_DOCKER_TARGET_TOKEN' })
@@ -82,6 +88,24 @@ try {
   assert.deepEqual(Buffer.from((await app(targetOrigin, download.url, { raw: true })).data), file)
   await app(targetOrigin, '/api/bootstrap', { cookie: owner.cookie, expected: 401 })
   assert((await target('/status')).outboundDisabled)
+  const saved = (await app(sourceOrigin,'/api/installation/backup-storage',{cookie:owner.cookie,method:'PUT',body:{endpoint:'http://backups:9000',bucket:'installation-backups',region:'us-east-1',accessKeyId:backupAccess,secretAccessKey:backupSecret}})).data
+  const nativeId=randomUUID();await app(sourceOrigin,'/api/installation/operations',{cookie:owner.cookie,method:'POST',body:{id:nativeId,kind:'backup'}})
+  let nativeStatus,nativeJob
+  for(let i=0;i<600;i++){nativeStatus=await source('/status');nativeJob=nativeStatus.jobs.find(j=>j.id===nativeId);if(nativeJob?.status==='complete'||nativeJob?.status==='failed')break;await delay(100)}
+  assert.equal(nativeJob?.status,'complete',JSON.stringify(nativeJob))
+  const nativeCopy=await downloadS3Backup({endpoint:'http://127.0.0.1:19983',bucket:'installation-backups',region:'us-east-1',accessKeyId:backupAccess,secretAccessKey:backupSecret,installationId:nativeStatus.installationId,recoveryKey:saved.recoveryKey},nativeJob.checkpoint,join(root,'native-backups'))
+  assert.equal(nativeCopy.manifestHash,nativeJob.result.manifestHash)
+  // Re-provision only this drill's target volume to test encrypted S3 recovery on real celld.
+  await runCommand([...compose,'rm','--stop','--force','target'])
+  await runCommand([...docker,'volume','rm',project+'_target-state'])
+  await runCommand([...compose,'up','-d','target']);await ready(targetOrigin)
+  process.env.ANYCORD_DOCKER_TARGET_TOKEN=await token('target')
+  await restoreBackup(target,nativeCopy.path,randomUUID())
+  const nativeOwner=await app(targetOrigin,'/api/auth/login',{method:'POST',body:{name:'drillowner',password:'correct-horse-battery'}})
+  assert((await app(targetOrigin,'/api/channels/general/messages',{cookie:nativeOwner.cookie})).data.some(m=>m.id===id&&m.text===text))
+  const nativeDownload=(await app(targetOrigin,`/api/attachments/${attachment}/download`,{cookie:nativeOwner.cookie})).data
+  assert.deepEqual(Buffer.from((await app(targetOrigin,nativeDownload.url,{raw:true})).data),file)
+  console.log('PASS real celld alarms → separate real RustFS with independent keys → encrypted S3 backup → offline download/decrypt → fresh celld restore and original private bytes')
   const sourceId = (await source('/status')).installationId, sourceToken = process.env.ANYCORD_DOCKER_SOURCE_TOKEN
   await activateCelld({ directory: nextDir, manifest: nextBuild }, { origin: sourceOrigin, celld: { composeFile, project, service: 'source', ...(context ? { context } : {}) } })
   await ready(sourceOrigin); await verifyInstallation(sourceOrigin, nextBuild)

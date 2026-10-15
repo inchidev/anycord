@@ -1,3 +1,6 @@
+import { backupStorageStatus, saveBackupStorage, backupConfig } from './backup-storage'
+import { cloudUpdateStatus, saveCloudUpdates, dispatchCloudUpdate } from './cloud-updates'
+import { scheduleNativeBackup } from './installation-operations'
 import { handleAppManagement, incomingSlackWebhook, incomingAppMessage, commandRegistry, invokeCommand, invocationResult, flushAppEvents } from './apps'
 import { requirePermission, serverAccess, initializeRoles, permissionsView, type PermissionMutation } from './permissions'
 import { roleInputSchema, memberRolesInputSchema, overridesInputSchema } from '../shared/contracts'
@@ -6,7 +9,7 @@ import { operatorRoute, operationsStatus, queueOperation, cancelOperation, updat
 import { maintenanceActive } from './maintenance'
 import { publishedRelease } from './releases'
 import { inviteTokenSchema, inviteInputSchema, recoveryResetSchema, passwordProofSchema } from '../shared/contracts'
-import { generateRecoveryKeys, resetWithRecoveryKey, randomToken, previewInvite, acceptInvite } from './access'
+import { generateRecoveryKeys, confirmPassword, resetWithRecoveryKey, randomToken, previewInvite, acceptInvite } from './access'
 import { and, eq, sql, desc, inArray } from 'drizzle-orm'
 import * as tables from '../db/schema'
 import { channelSchema, credentialsSchema, editMessageSchema, integrationSchema, messageSchema, reactionSchema, threadCreateSchema, workspaceSchema, workspaceUpdateSchema, channelUpdateSchema } from '../shared/contracts'
@@ -188,8 +191,19 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
   }
   if (endpoint?.name === 'appPost') return incomingAppMessage(env, endpoint.params.appId!, request)
   const user = await requireUser(request, env)
-  if (endpoint && ['operations','operationCreate','operationCancel','backupPolicyUpdate','installationRelease','restoredIntegrations'].includes(endpoint.name)) {
+  if (endpoint && ['operations','operationCreate','operationCancel','operationRetry','backupPolicyUpdate','installationRelease','restoredIntegrations','backupStorage','backupStorageUpdate','backupRecoveryKey','cloudUpdates','cloudUpdatesUpdate'].includes(endpoint.name)) {
     if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can manage backups and updates')
+    if (endpoint.name === 'backupRecoveryKey') {
+      if (!await hub(env, '_auth').consumeRate(`backup-key:${user.id}`, 5)) throw new HttpError(429, 'Try again in a minute')
+      const proof = passwordProofSchema.parse(await readBody(request)); await confirmPassword(env, user.id, proof.password)
+      const config = await backupConfig(env); if (!config) throw new HttpError(404, 'Backup storage is not configured')
+      return json({ key: config.recoveryKey })
+    }
+    if (endpoint.name === 'backupStorage') return json(await backupStorageStatus(env))
+    if (endpoint.name === 'backupStorageUpdate') return json(await saveBackupStorage(env, engine, await readBody(request)))
+    if (endpoint.name === 'cloudUpdates') return json(await cloudUpdateStatus(env))
+    if (endpoint.name === 'cloudUpdatesUpdate') return json(await saveCloudUpdates(env, await readBody(request)))
+    if (endpoint.name === 'operationRetry') return json(await dispatchCloudUpdate(env, endpoint.params.jobId!, true))
     if (endpoint.name === 'operations') return json(await operationsStatus(env, engine))
     if (endpoint.name === 'operationCreate') return json(await queueOperation(env, engine, user.id, await readBody(request)))
     if (endpoint.name === 'operationCancel') return json(await cancelOperation(env, endpoint.params.jobId!))
@@ -588,6 +602,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
 export function createD1Handler(engine: 'celld' | 'cloudflare') {
 return {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(scheduleNativeBackup(env, engine))
     if (await maintenanceActive(env)) return
     if (event.cron !== '* * * * *') ctx.waitUntil(cleanupAttachments(env))
     ctx.waitUntil(flushTelegramNotifications(env))

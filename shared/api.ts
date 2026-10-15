@@ -1,3 +1,4 @@
+import { backupStorageInputSchema, backupStorageStatusSchema, backupStorageSavedSchema, cloudUpdateInputSchema, cloudUpdateStatusSchema } from './backup-settings'
 import { slackWebhookInputSchema, slackWebhookSchema, slackWebhookCredentialSchema, slackMessageSchema, appPolicySchema, appConfigSchema, appSchema, appCredentialSchema, webhookMessageSchema, commandInvokeSchema, commandResultSchema, commandRegistrySchema, appAuditSchema, appDeliverySchema } from './apps'
 import { z } from 'zod'
 import { operationsStatusSchema, backupPolicySchema, jobRequestSchema, jobSchema, releaseSchema } from './operations'
@@ -31,6 +32,12 @@ function endpoint(method: string, path: string, body: z.ZodType, response: z.Zod
 // The public wire contract, independent of D1, Durable Objects and backend SDKs.
 // Operational migration routes and Better Auth's native endpoints are not public app endpoints.
 export const endpoints = {
+  backupRecoveryKey: endpoint('POST', '/api/installation/backup-storage/recovery-key', passwordProofSchema, z.object({ key: z.string() })),
+  backupStorage: endpoint('GET', '/api/installation/backup-storage', none, backupStorageStatusSchema),
+  backupStorageUpdate: endpoint('PUT', '/api/installation/backup-storage', backupStorageInputSchema, backupStorageSavedSchema),
+  cloudUpdates: endpoint('GET', '/api/installation/cloud-updates', none, cloudUpdateStatusSchema),
+  cloudUpdatesUpdate: endpoint('PUT', '/api/installation/cloud-updates', cloudUpdateInputSchema, cloudUpdateStatusSchema),
+  operationRetry: endpoint('POST', '/api/installation/operations/:jobId/retry', none, ok),
   operations: endpoint('GET', '/api/installation/operations', none, operationsStatusSchema),
   operationCreate: endpoint('POST', '/api/installation/operations', jobRequestSchema, jobSchema),
   operationCancel: endpoint('DELETE', '/api/installation/operations/:jobId', none, ok),

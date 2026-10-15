@@ -1,3 +1,4 @@
+import { initializeBackupStorage, beginNativeBackup, pumpNativeBackups } from './native-backups'
 import { serverAccess, requirePermission, requireLowerMember, preparePermissionMutation, type PermissionMutation } from './permissions'
 import { DurableObject } from 'cloudflare:workers'
 import type { LiveEvent, User } from '../shared/contracts'
@@ -14,7 +15,19 @@ export class WorkspaceHub extends DurableObject<Env> {
   private huddleQueue: Promise<unknown> = Promise.resolve()
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
+    initializeBackupStorage(ctx.storage)
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL)')
+  }
+  beginBackup(jobId: string, engine: 'cloudflare' | 'celld') {
+    const result = this.huddleQueue.then(async () => {
+      try { return await beginNativeBackup(this.env, this.ctx.storage, jobId, engine) }
+      catch (error) { if (error instanceof HttpError) return { ok: false as const, status: error.status, message: error.message }; throw error }
+    })
+    this.huddleQueue = result.catch(() => undefined); return result
+  }
+  override alarm() {
+    const result = this.huddleQueue.then(() => pumpNativeBackups(this.env, this.ctx.storage))
+    this.huddleQueue = result.catch(() => undefined); return result
   }
   consumeRate(key: string, limit: number) {
     const bucket = Math.floor(Date.now() / 60_000)

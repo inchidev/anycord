@@ -3,13 +3,14 @@ import { createServer } from 'node:http'
 import { readFile, mkdtemp, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { operationClient, createBackup } from '../operations/core.mjs'
+import { operationClient } from '../operations/core.mjs'
 import { resolve, extname } from 'node:path'
 import { createHmac } from 'node:crypto'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { chromium } from 'playwright'
 // The generated client calls a disposable real Worker/D1 through a loopback
 // server. Only the Telegram SDK and bot provider are replaced with local doubles.
+const backupObjects = new Map(), dispatches = []; let releaseBackup, holdBackup = false
 const root = resolve('.output/public'), botToken = '12345:local-test-token-never-send-to-telegram'
 const types = { '.js':'text/javascript', '.css':'text/css', '.html':'text/html', '.json':'application/json', '.png':'image/png', '.svg':'image/svg+xml' }
 let mf, browser
@@ -33,7 +34,14 @@ const server = createServer(async (req,res) => {
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 const base=`http://127.0.0.1:${server.address().port}`
 try {
-  mf=new Miniflare(convertV4MiniflareOptions({modules:true,modulesRoot:resolve('runtime/cloudflare'),scriptPath:resolve('runtime/cloudflare/worker.js'),compatibilityDate:'2026-10-14',compatibilityFlags:['nodejs_compat'],cf:false,d1Databases:['DB'],r2Buckets:['FILES'],durableObjects:{HUBS:{className:'WorkspaceHub',useSQLite:true},ROOMS:{className:'ChatRoom',useSQLite:true}},bindings:{AUTH_BASE_URL:base,APP_SECRET:crypto.randomUUID(),MIGRATION_TOKEN:'local-migration',SETUP_TOKEN:'local-setup'},outboundService:request=>{
+  mf=new Miniflare(convertV4MiniflareOptions({modules:true,modulesRoot:resolve('runtime/cloudflare'),scriptPath:resolve('runtime/cloudflare/worker.js'),compatibilityDate:'2026-10-14',compatibilityFlags:['nodejs_compat'],cf:false,d1Databases:['DB'],r2Buckets:['FILES'],durableObjects:{HUBS:{className:'WorkspaceHub',useSQLite:true},ROOMS:{className:'ChatRoom',useSQLite:true}},bindings:{AUTH_BASE_URL:base,APP_SECRET:crypto.randomUUID(),MIGRATION_TOKEN:'local-migration',SETUP_TOKEN:'local-setup'},outboundService:async request=>{
+    const url = new URL(request.url)
+    if (url.origin === 'https://s3.test') {
+      if (request.method === 'PUT') { backupObjects.set(url.pathname, new Uint8Array(await request.arrayBuffer())); if (holdBackup && url.pathname.includes('/tables/')) await new Promise(resolve => { releaseBackup = resolve }); return new Response(null) }
+      if (request.method === 'GET') return backupObjects.has(url.pathname) ? new Response(backupObjects.get(url.pathname)) : new Response(null,{status:404})
+      if (request.method === 'DELETE') { backupObjects.delete(url.pathname); return new Response(null) }
+    }
+    if (url.origin === 'https://api.github.com' && url.pathname.includes('/actions/workflows/')) { if (request.method === 'POST') { dispatches.push(await request.json()); return new Response(null,{status:204}) }; return Response.json({state:'active'}) }
     if (new URL(request.url).origin === 'https://api.github.com') return Response.json({ tag_name: 'v' + nextRelease.version, immutable: true, draft: false, prerelease: false, body: 'Disposable release fixture', assets: [{ name: 'anycord-release.json' }] })
     if (new URL(request.url).origin === 'https://github.com') { assert(new URL(request.url).pathname.endsWith('/anycord-release.json')); return Response.json(nextRelease) }
     assert.equal(new URL(request.url).origin,'https://api.telegram.org');assert(new URL(request.url).pathname.endsWith('/getMe'))
@@ -90,31 +98,41 @@ try {
   await ownerPage.getByRole('button',{name:'Backups & updates',exact:true}).click()
   await ownerPage.getByRole('heading',{name:'Backups & updates',exact:true}).waitFor()
   assert(await ownerPage.getByRole('button',{name:'Create backup',exact:true}).isDisabled())
-  await ownerPage.getByText('Operations runner is offline',{exact:true}).waitFor()
+  await ownerPage.getByText('Configure separate S3 backup storage',{exact:true}).waitFor()
+  await ownerPage.getByLabel('Backup S3 endpoint',{exact:true}).fill('https://s3.test')
+  await ownerPage.getByLabel('Backup bucket',{exact:true}).fill('independent-backups')
+  await ownerPage.getByLabel('Backup access key',{exact:true}).fill('separate-backup-access')
+  await ownerPage.getByLabel('Backup secret key',{exact:true}).fill('separate-backup-secret')
+  await ownerPage.getByRole('button',{name:'Verify and save backup storage',exact:true}).click()
+  await ownerPage.getByRole('heading',{name:'Save your backup recovery key',exact:true}).waitFor()
+  assert.match(await ownerPage.getByRole('textbox',{name:'Backup recovery key',exact:true}).inputValue(),/^[a-f0-9]{64}$/)
+  await ownerPage.getByRole('button',{name:'I saved the recovery key',exact:true}).click()
+  await ownerPage.getByLabel('Deployment repository',{exact:true}).fill('owner/deployment')
+  await ownerPage.getByLabel('GitHub Actions token',{exact:true}).fill('private-actions-token')
+  await ownerPage.getByRole('button',{name:'Verify and save update executor',exact:true}).click()
+  await ownerPage.getByText('Cloud update workflow verified and saved',{exact:true}).waitFor()
   process.env.ANYCORD_BROWSER_TEST_MIGRATION_TOKEN='local-migration'
   const operator=operationClient({origin:base,migrationTokenEnv:'ANYCORD_BROWSER_TEST_MIGRATION_TOKEN'})
-  await operator('/heartbeat',{method:'POST',body:{}})
-  await ownerPage.getByRole('button',{name:'Refresh runner status',exact:true}).click()
-  await ownerPage.getByText('Runner connected · backups are kept outside the application by your operator.',{exact:true}).waitFor()
+  assert.equal((await operator('/status')).runnerSeen,null,'UI operations do not require a runner heartbeat')
   await ownerPage.getByLabel('Back up every (hours)',{exact:true}).fill('12')
   await ownerPage.getByLabel('Keep recent recovery points',{exact:true}).fill('2')
   await ownerPage.getByRole('button',{name:'Save backup policy',exact:true}).click()
   await ownerPage.getByText('Backup schedule and retention saved.',{exact:true}).waitFor()
   assert.deepEqual((await operator('/status')).policy,{backupHours:12,retainBackups:2})
+  holdBackup=true
   await ownerPage.getByRole('button',{name:'Create backup',exact:true}).click()
-  await ownerPage.getByText('Waiting for runner',{exact:true}).waitFor()
-  const claim=await operator('/claim',{method:'POST',body:{runnerId:crypto.randomUUID()}})
-  await operator(`/jobs/${claim.job.id}/snapshot`,{method:'POST',key:claim.key,body:{}})
   await ownerPage.getByText('Copying frozen data and files',{exact:true}).waitFor()
   await ownerPage.getByText('Installation is in maintenance',{exact:true}).waitFor()
-  const backup=await createBackup(operator,claim.job,claim.key,backupDirectory)
-  await ownerPage.getByText(backup.manifest.id,{exact:true}).waitFor()
-  await ownerPage.getByText('Installation is in maintenance',{exact:true}).waitFor({state:'hidden'})
-  const update=ownerPage.getByRole('button',{name:'Back up and update to '+nextRelease.version,exact:true})
-  await update.click();await ownerPage.getByText('Waiting for runner',{exact:true}).waitFor()
   await ownerPage.getByRole('button',{name:'Cancel operation',exact:true}).click()
-  await ownerPage.getByRole('button',{name:'Cancel operation',exact:true}).waitFor({state:'hidden'})
-  assert.equal((await operator('/status')).jobs[0].phase,'cancelled')
+  holdBackup=false;releaseBackup?.()
+  await ownerPage.getByText('Installation is in maintenance',{exact:true}).waitFor({state:'hidden'})
+  await ownerPage.getByRole('button',{name:'Create backup',exact:true}).click()
+  await ownerPage.getByText('Installation is in maintenance',{exact:true}).waitFor({state:'hidden',timeout:60000})
+  let checkpoint
+  for(let i=0;i<300;i++){checkpoint=(await operator('/status')).jobs.find(j=>j.kind==='backup'&&j.status==='complete');if(checkpoint)break;await new Promise(r=>setTimeout(r,100))}
+  assert(checkpoint?.result?.manifestHash)
+  await ownerPage.getByText(checkpoint.checkpoint,{exact:true}).waitFor()
+  assert([...backupObjects.keys()].some(k=>k.endsWith('/manifest.json')))
   await mkdir('output/operations',{recursive:true})
   for(const viewport of [{width:390,height:844},{width:1280,height:900}]) {
     await ownerPage.setViewportSize(viewport)
@@ -122,7 +140,12 @@ try {
     const card=ownerPage.locator('.operations-settings');assert(await card.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'No operations panel overflow')
     await ownerPage.screenshot({path:`output/operations/settings-${viewport.width}.png`})
   }
-  console.log('PASS actual owner operations UI at 390/1280px: offline guard, runner heartbeat, saved policy, real Worker backup/maintenance/progress/checkpoint, exact release choice and cancellation')
+  const update=ownerPage.getByRole('button',{name:'Back up and update to '+nextRelease.version,exact:true})
+  await update.click()
+  await ownerPage.getByText('Waiting for GitHub Actions',{exact:true}).waitFor({timeout:60000})
+  assert.equal(dispatches.length,1);assert.equal(dispatches[0].inputs.version,nextRelease.version)
+  assert.equal((await operator('/status')).runnerSeen,null)
+  console.log('PASS actual owner operations UI at 390/1280px: separate S3 credentials, recovery-key delivery, cloud executor configuration, schedule, native backup/maintenance/cancellation/checkpoint and GitHub dispatch without a runner heartbeat')
   await ownerPage.keyboard.press('Escape');await ownerPage.getByRole('dialog').waitFor({state:'hidden'})
   console.log('PASS actual local installation owner settings: authentication policy loads, scope/back repeats in one dialog and Escape closes')
 }finally{delete process.env.ANYCORD_BROWSER_TEST_MIGRATION_TOKEN;await browser?.close();await mf?.dispose();await new Promise(resolve=>server.close(resolve));await rm(backupDirectory,{recursive:true,force:true})}

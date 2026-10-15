@@ -10,7 +10,7 @@ import { promisify } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
 const exec = promisify(execFile)
 const contractPath = existsSync(new URL('./contracts.mjs', import.meta.url)) ? './contracts.mjs' : '../runtime/operations-contracts.mjs'
-const { backupManifestSchema, releaseManifestSchema, backupTables, stableVersion } = await import(new URL(contractPath, import.meta.url))
+const { backupManifestSchema, releaseManifestSchema, backupTables, stableVersion, decodeBackupPayload, verifyBackupManifest, AwsClient } = await import(new URL(contractPath, import.meta.url))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const repository = 'inchidev/anycord'
 export function installationOrigin(value) {
@@ -58,26 +58,79 @@ async function decryptSetting(value, secret) {
   const key = await webcrypto.subtle.importKey('raw', createHash('sha256').update(secret).digest(), 'AES-GCM', false, ['decrypt'])
   return new TextDecoder().decode(await webcrypto.subtle.decrypt({ name: 'AES-GCM', iv: Buffer.from(iv, 'hex') }, key, Buffer.from(data, 'hex')))
 }
+async function recoveryKey(root) {
+  if (process.env.ANYCORD_BACKUP_KEY) return process.env.ANYCORD_BACKUP_KEY
+  try { return (await readFile(join(root,'private/recovery-key'),'utf8')).trim() } catch { throw new Error('Set ANYCORD_BACKUP_KEY or supply the private backup recovery key file') }
+}
+async function payloadBytes(root, entry, key) {
+  const bytes = await readFile(checkedPath(root,entry.path))
+  if (!entry.encodedSha256) return bytes
+  assert.equal(bytes.length,entry.encodedSize);assert.equal(hash(bytes),entry.encodedSha256,'Encrypted backup payload integrity failure')
+  const plain=Buffer.from(await decodeBackupPayload(bytes,key || await recoveryKey(root)))
+  assert.equal(plain.length,entry.size);assert.equal(hash(plain),entry.sha256,'Decrypted backup payload integrity failure');return plain
+}
+async function* tableRecords(root, table) {
+  if (!table.parts) { yield* records(checkedPath(root,table.path)); return }
+  const key=await recoveryKey(root)
+  for(const part of table.parts){ const bytes=await payloadBytes(root,part,key);for(const line of bytes.toString('utf8').split('\n')){assert(Buffer.byteLength(line)<=1_000_000,'Backup record exceeds size limit');if(line)yield JSON.parse(line)} }
+}
+const allPayloads = manifest => [...manifest.tables.flatMap(t=>t.parts || [t]),...manifest.objects,manifest.secrets]
+export async function downloadCloudRecovery(client, job, key, directory) {
+  assert(job.checkpoint && job.result?.manifestHash,'The update requires a verified S3 checkpoint')
+  await privateDirectory(directory)
+  const root=join(directory,job.checkpoint)
+  if(existsSync(join(root,'manifest.json'))){ const saved=await verifyBackup(root);assert.equal(saved.manifestHash,job.result.manifestHash);return saved }
+  await rm(root,{recursive:true,force:true});await mkdir(root,{mode:0o700})
+  const response=await client(`/jobs/${job.id}/recovery-manifest`,{key,raw:true}),text=await textBounded(response,8*1024*1024)
+  assert.equal(hash(text),job.result.manifestHash,'Cloud recovery manifest differs from the approved checkpoint')
+  const manifest=backupManifestSchema.parse(JSON.parse(text));assert.equal(manifest.id,job.checkpoint)
+  const secret=await client(`/jobs/${job.id}/recovery-key`,{key});assert(/^[a-f0-9]{64}$/.test(secret.key))
+  assert(await verifyBackupManifest(manifest,secret.key),'Cloud recovery manifest authentication failed')
+  await privateWrite(join(root,'private/recovery-key'),secret.key+'\n')
+  for(const entry of allPayloads(manifest)){
+    const output=checkedPath(root,entry.path);await mkdir(dirname(output),{recursive:true,mode:0o700})
+    const payload=await client(`/jobs/${job.id}/recovery-payload?path=${encodeURIComponent(entry.path)}`,{key,raw:true})
+    let size=0;const limiter=new Transform({transform(chunk,encoding,callback){size+=chunk.length;callback(size>entry.encodedSize?new Error('Cloud recovery payload exceeded its inventory'):null,chunk)}})
+    await pipeline(Readable.fromWeb(payload.body),limiter,createWriteStream(output,{flags:'wx',mode:0o600}));assert.equal(size,entry.encodedSize)
+  }
+  await privateWrite(join(root,'manifest.json'),text)
+  const verified=await verifyBackup(root);assert.equal(verified.manifestHash,job.result.manifestHash);return verified
+}
+export async function downloadS3Backup(config, id, directory, transport=fetch) {
+  assert(/^[a-f0-9-]{36}$/.test(id),'Choose a backup UUID');assert(config.installationId && /^[a-f0-9-]+$/.test(config.installationId),'Choose the source installation ID')
+  const endpoint=installationOrigin(config.endpoint),client=new AwsClient({accessKeyId:config.accessKeyId,secretAccessKey:config.secretAccessKey,region:config.region || 'auto',service:'s3',retries:1})
+  const request=async path=>transport(await client.sign(`${endpoint}/${encodeURIComponent(config.bucket)}/anycord-backups/${config.installationId}/${id}/${path.split('/').map(encodeURIComponent).join('/')}`,{redirect:'error',signal:AbortSignal.timeout(60_000)}))
+  const response=await request('manifest.json'),text=await textBounded(response,8*1024*1024)
+  const manifest=backupManifestSchema.parse(JSON.parse(text));assert.equal(manifest.id,id);assert.equal(manifest.installationId,config.installationId);assert.equal(manifest.format,2)
+  const root=join(directory,id);assert(await verifyBackupManifest(manifest,config.recoveryKey || process.env.ANYCORD_BACKUP_KEY),'Backup manifest authentication failed; check its recovery key')
+  for(const entry of allPayloads(manifest))checkedPath(root,entry.path)
+  await privateDirectory(directory);await mkdir(root,{mode:0o700})
+  for(const entry of allPayloads(manifest)){const r=await request(entry.path);assert(r.ok);const output=checkedPath(root,entry.path);await mkdir(dirname(output),{recursive:true,mode:0o700});let size=0;const limiter=new Transform({transform(chunk,encoding,callback){size+=chunk.length;callback(size>entry.encodedSize?new Error('S3 backup payload exceeds its inventory'):null,chunk)}});await pipeline(Readable.fromWeb(r.body),limiter,createWriteStream(output,{flags:'wx',mode:0o600}));assert.equal(size,entry.encodedSize)}
+  if(config.recoveryKey)await privateWrite(join(root,'private/recovery-key'),config.recoveryKey+'\n')
+  await privateWrite(join(root,'manifest.json'),text);return {path:root,...await verifyBackup(root)}
+}
 export async function verifyBackup(root) {
   assert((await lstat(root)).isDirectory() && !(await lstat(root)).isSymbolicLink(), 'Backup root must be a real directory')
   assert((await lstat(join(root, 'manifest.json'))).isFile() && !(await lstat(join(root, 'manifest.json'))).isSymbolicLink(), 'Backup manifest must be a regular file')
   const manifest = backupManifestSchema.parse(JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')))
   assert.deepEqual(manifest.tables.map(t => t.name).sort(), [...backupTables].sort(), 'Backup must contain exactly the supported application tables')
-  const all = [...manifest.tables, ...manifest.objects, manifest.secrets], paths = new Set()
+  if(manifest.format===2)assert(await verifyBackupManifest(manifest,await recoveryKey(root)),'Backup manifest authentication failed')
+  const all = allPayloads(manifest), paths = new Set()
   const realRoot = await realpath(root)
   for (const entry of all) {
     const path = checkedPath(root, entry.path); assert(!paths.has(path), 'Duplicate backup path'); paths.add(path)
     const stat = await lstat(path); assert(stat.isFile() && !stat.isSymbolicLink(), 'Backup payload must be a regular file')
     assert((await realpath(path)).startsWith(realRoot + sep), 'Backup payload follows an external symlink')
-    assert.deepEqual(await fileIdentity(path), { size: entry.size, sha256: entry.sha256 }, 'Backup payload integrity failure')
+    assert.deepEqual(await fileIdentity(path), { size: entry.encodedSize ?? entry.size, sha256: entry.encodedSha256 || entry.sha256 }, 'Backup payload integrity failure')
+    if(manifest.format===2)await payloadBytes(root,entry)
   }
-  const secrets = JSON.parse(await readFile(checkedPath(root, manifest.secrets.path), 'utf8')); assert(typeof secrets.APP_SECRET === 'string' && secrets.APP_SECRET.length >= 32, 'Backup encryption key missing')
+  const secrets = JSON.parse((await payloadBytes(root,manifest.secrets)).toString('utf8')); assert(typeof secrets.APP_SECRET === 'string' && secrets.APP_SECRET.length >= 32, 'Backup encryption key missing')
   for (const table of manifest.tables) {
     let count = 0
-    for await (const row of records(checkedPath(root, table.path))) {
+    for await (const row of tableRecords(root,table)) {
       assert.deepEqual(Object.keys(row).sort(), [...table.columns].sort(), 'Backup record columns differ from manifest')
       assert(Object.values(row).every(v => v === null || typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))), 'Backup values must be SQLite scalar values')
-      if (table.name === 'settings' && ['authentication', 'openrouterKey', 'realtimeToken'].includes(row.key) && row.value) await decryptSetting(row.value, secrets.APP_SECRET)
+      if (table.name === 'settings' && ['authentication', 'openrouterKey', 'realtimeToken', 'backupStorage', 'cloudUpdates'].includes(row.key) && row.value) await decryptSetting(row.value, secrets.APP_SECRET)
       if (table.name === 'server_apps' && row.signing_secret) await decryptSetting(row.signing_secret, secrets.APP_SECRET)
       if (table.name === 'storage_configs') await decryptSetting(row.config, secrets.APP_SECRET)
       count++
@@ -86,7 +139,7 @@ export async function verifyBackup(root) {
   }
   const attachments = manifest.tables.find(t => t.name === 'attachments'), objects = new Map(manifest.objects.map(o => [o.id, o])); assert.equal(objects.size, manifest.objects.length)
   let count = 0
-  for await (const row of records(checkedPath(root, attachments.path))) { const object = objects.get(row.id); assert(object && object.size === row.size && row.status === 'uploaded' && row.message_id, 'Committed attachment inventory mismatch'); count++ }
+  for await (const row of tableRecords(root,attachments)) { const object = objects.get(row.id); assert(object && object.size === row.size && row.status === 'uploaded' && row.message_id, 'Committed attachment inventory mismatch'); count++ }
   assert.equal(count, manifest.objects.length, 'Backup contains orphan/missing attachment objects')
   return { manifest, secrets, manifestHash: hash(await readFile(join(root, 'manifest.json'))) }
 }
@@ -150,7 +203,7 @@ export async function restoreBackup(client, backupPath, runnerId, { resumeId } =
     async function restoreTable(name, links = false) {
       const table = manifest.tables.find(t => t.name === name); let rows = []
       const send = async () => { if (rows.length) await client(`/jobs/${id}/tables/${name}`, { method: 'POST', key, body: { rows, links, backupSecret: secrets.APP_SECRET } }); rows = [] }
-      for await (const row of records(checkedPath(backupPath, table.path))) { rows.push(row); if (rows.length === 25) await send() }
+      for await (const row of tableRecords(backupPath,table)) { rows.push(row); if (rows.length === 25) await send() }
       await send()
     }
     for (const table of order) await restoreTable(table)
@@ -158,7 +211,7 @@ export async function restoreBackup(client, backupPath, runnerId, { resumeId } =
     await client(`/jobs/${id}/progress`, { method: 'POST', key, body: { phase: 'restore-files' } })
     for (const file of manifest.objects) {
       // Application attachments are bounded individually, unlike the total backup.
-      const bytes = await readFile(checkedPath(backupPath, file.path))
+      const bytes = await payloadBytes(backupPath,file)
       await client(`/jobs/${id}/objects/${file.id}`, { method: 'PUT', key, body: bytes, raw: true })
       const response = await client(`/jobs/${id}/objects/${file.id}`, { key, raw: true })
       assert.equal(hash(Buffer.from(await response.arrayBuffer())), file.sha256, 'Restored attachment readback failed')
@@ -166,7 +219,7 @@ export async function restoreBackup(client, backupPath, runnerId, { resumeId } =
     for (const table of manifest.tables) {
       let rows = []
       const send = async () => { if (rows.length) await client(`/jobs/${id}/verify-table`, { method: 'POST', key, body: { table: table.name, rows, restored: true, backupSecret: secrets.APP_SECRET } }); rows = [] }
-      for await (const row of records(checkedPath(backupPath, table.path))) { rows.push(row); if (rows.length === 25) await send() }
+      for await (const row of tableRecords(backupPath,table)) { rows.push(row); if (rows.length === 25) await send() }
       await send()
     }
     await client(`/jobs/${id}/finish`, { method: 'POST', key, body: { success: true, result: { files: manifest.objects.length } } })
@@ -188,10 +241,10 @@ export async function retainBackups(directory, installationId, keep, pinned = ne
   for (const backup of verified.slice(keep)) if (!pinned.has(backup.name)) await rm(join(directory, backup.name), { recursive: true })
 }
 
-async function textBounded(response) {
+async function textBounded(response,limit=512_000) {
   assert(response.ok, `Release metadata unavailable (${response.status})`)
   const chunks = []; let size = 0
-  for await (const chunk of Readable.fromWeb(response.body)) { size += chunk.length; assert(size <= 512_000, 'Release metadata too large'); chunks.push(chunk) }
+  for await (const chunk of Readable.fromWeb(response.body)) { size += chunk.length; assert(size <= limit, 'Remote metadata too large'); chunks.push(chunk) }
   return Buffer.concat(chunks).toString('utf8')
 }
 async function jsonBounded(response) { return JSON.parse(await textBounded(response)) }
@@ -213,7 +266,7 @@ export async function verifyRecoveryPoint(client, job, key, path) {
   for (const table of backup.manifest.tables) {
     let rows = []
     const send = async () => { if (rows.length) await client(`/jobs/${job.id}/verify-table`, { method: 'POST', key, body: { table: table.name, rows } }); rows = [] }
-    for await (const row of records(checkedPath(path, table.path))) { rows.push(row); if (rows.length === 25) await send() }
+    for await (const row of tableRecords(path,table)) { rows.push(row); if (rows.length === 25) await send() }
     await send()
   }
   for (const file of backup.manifest.objects) { const response = await client(`/jobs/${job.id}/objects/${file.id}`, { key, raw: true }); const digest = createHash('sha256'); let size = 0; for await (const chunk of Readable.fromWeb(response.body)) { size += chunk.length; assert(size <= file.size); digest.update(chunk) } assert.equal(size, file.size); assert.equal(digest.digest('hex'), file.sha256, 'Update changed a private attachment') }
@@ -289,6 +342,7 @@ export async function executeJob(client, job, key, config, { activate, prepare =
     assert.equal(job.kind, 'update', 'Restore is an explicit separate command')
     const before = await client('/status'), expected = { version: job.targetVersion, commit: job.targetCommit, apiVersion: job.targetApiVersion, schema: job.targetSchema }
     assert.equal(before.engine, config.engine, 'Configured activation engine differs from the installation')
+    if(config.backupMode==='installation-s3' && job.checkpoint)await downloadCloudRecovery(client,job,key,config.backupDirectory)
     // If a runner stopped after deployment, prove the exact target before
     // retrying any activation. The job's checkpoint remains pinned.
     if (before.build.version === job.targetVersion && before.build.commit === job.targetCommit) {

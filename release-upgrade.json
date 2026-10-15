@@ -1,6 +1,7 @@
 {
   "fromSchemas": [
-    "0011_fancy_vanisher"
+    "0011_fancy_vanisher",
+    "0012_separate_s3_backups"
   ],
-  "migrations": "none"
+  "migrations": "backward-compatible"
 }

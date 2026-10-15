@@ -243,5 +243,11 @@
       "CREATE TRIGGER maintenance_app_slack_webhooks_update BEFORE UPDATE ON app_slack_webhooks WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;",
       "CREATE TRIGGER maintenance_app_slack_webhooks_delete BEFORE DELETE ON app_slack_webhooks WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;"
     ]
+  },
+  {
+    "name": "0012_separate_s3_backups",
+    "statements": [
+      "CREATE TABLE `installation_backups` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`job_id` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`manifest_hash` text NOT NULL,\n\t`manifest_key` text NOT NULL,\n\t`destination` text NOT NULL\n);"
+    ]
   }
 ]
