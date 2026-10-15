@@ -88,11 +88,16 @@ export async function slackWebhookChecks({ mf, db, base, request, owner, member,
     controller.enqueue(encoder.encode('{"text":'))
     finishBody = () => { controller.enqueue(encoder.encode('"Racing revocation"}')); controller.close() }
   } })
-  const inFlight = mf.dispatchFetch(latest.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: streamingBody, duplex: 'half' })
+  const inFlight = mf.dispatchFetch(latest.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: streamingBody, duplex: 'half' }).then(response => ({ response }), error => ({ error }))
   await request(appPath + '/rotate', { who: owner, method: 'POST' })
   finishBody()
   const denied = await inFlight
-  assert([403, 404].includes(denied.status)); await denied.body?.cancel()
+  // Revocation can reject headers before the unfinished upload reaches the
+  // Worker. Undici then reports an early EPIPE instead of delivering its 403.
+  // The durable no-write check and subsequent 404 also prove the runtime is
+  // alive and the credential is revoked; other transport failures still fail.
+  if (denied.error) assert.equal(denied.error.cause?.code, 'EPIPE')
+  else { assert([403, 404].includes(denied.response.status)); await denied.response.body?.cancel() }
   assert.equal(await db.prepare('SELECT count(*) AS n FROM messages WHERE app_id = ? AND text = ?').bind(bot.app.id, 'Racing revocation').first('n'), 0, 'A request whose body finishes after revocation cannot post')
   await send(latest.url, { status: 404, expected: 'invalid_token' }); await send(hook2.url, { status: 404, expected: 'invalid_token' })
   const final = await create()

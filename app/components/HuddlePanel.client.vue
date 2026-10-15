@@ -44,7 +44,7 @@ onMounted(async () => {
     const initialized = await Client.init({ authToken: props.token, defaults: { audio: true, video: false } })
     if (disposed) { await initialized.leave(); return }
     meeting = initialized
-    meeting.self.on('roomLeft', () => emit('leave'))
+    meeting.self.on('roomLeft', () => { if (!disposed) emit('leave') })
     meeting.self.on('roomJoined', () => { void refreshDevices() })
     meeting.self.on('deviceListUpdate', () => { void refreshDevices() })
     meeting.self.on('deviceUpdate', () => { void refreshDevices() })
@@ -68,6 +68,6 @@ onBeforeUnmount(() => { disposed = true; void meeting?.leave().catch(() => undef
       <div class="flex flex-wrap gap-3"><UButton color="neutral" variant="outline" :icon="muted ? 'i-lucide-mic-off' : 'i-lucide-mic'" :loading="changing" @click="toggleMicrophone">{{ muted ? 'Unmute microphone' : 'Mute microphone' }}</UButton><UButton color="neutral" variant="ghost" @click="refreshDevices">Refresh devices</UButton></div>
       <UAlert v-if="audioError" color="error" :title="audioError" />
     </div>
-    <rtk-meeting ref="meetingElement" show-setup-screen="true" class="rtk-surface" />
+    <rtk-meeting ref="meetingElement" mode="fill" show-setup-screen="true" class="rtk-surface" />
   </div>
 </template>

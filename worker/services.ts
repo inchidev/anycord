@@ -21,7 +21,7 @@ export async function realtimeRequest(env: Env, path: string, method = 'GET', bo
     method, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15_000),
   })
-  const result = z.object({ success: z.boolean(), data: z.unknown().optional() }).safeParse(await response.json())
+  const result = z.object({ success: z.boolean(), data: z.unknown().optional() }).safeParse(await response.json().catch(() => null))
   if (!response.ok || !result.success || !result.data.success) throw new HttpError(502, `RealtimeKit rejected the request (${response.status}). Check the credentials and preset.`)
   return result.data.data
 }
@@ -33,9 +33,14 @@ export async function joinHuddle(env: Env, channelId: string, title: string, use
   if (!speak) {
     preset = config.realtimeListenerPreset
     if (!preset) throw new HttpError(409, 'The installation owner must configure a listener preset before listen-only huddles are available')
-    const presets = z.array(z.object({ name: z.string(), permissions: z.object({ media: z.object({ audio: z.object({ can_produce: z.string() }) }), can_change_participant_permissions: z.boolean(), can_accept_production_requests: z.boolean() }).optional() })).parse(await realtimeRequest(env, '/presets'))
-    const permissions = presets.find(item => item.name === preset)?.permissions
-    if (!permissions || permissions.media.audio.can_produce !== 'NOT_ALLOWED' || permissions.can_change_participant_permissions || permissions.can_accept_production_requests) throw new HttpError(409, 'The listener preset must deny audio production and participant permission changes')
+    // The list endpoint contains metadata only; permissions live on the detail
+    // endpoint. Search by name and still require an exact match before use.
+    const presets = z.array(z.object({ id: z.uuid(), name: z.string() })).parse(await realtimeRequest(env, `/presets?search=${encodeURIComponent(preset)}&per_page=100`))
+    const found = presets.find(item => item.name === preset)
+    if (!found) throw new HttpError(409, 'The configured listener preset was not found')
+    const media = z.object({ can_produce: z.literal('NOT_ALLOWED') })
+    const listener = z.object({ name: z.literal(preset), permissions: z.object({ media: z.object({ audio: media, video: media, screenshare: media }), can_change_participant_permissions: z.literal(false), can_accept_production_requests: z.literal(false) }) })
+    if (!listener.safeParse(await realtimeRequest(env, `/presets/${found.id}`)).success) throw new HttpError(409, 'The listener preset must deny audio, video and screen production and participant permission changes')
   }
   let meeting = await db.select().from(huddles).where(eq(huddles.channelId, channelId)).get()
   if (!meeting) {
