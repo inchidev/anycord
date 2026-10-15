@@ -211,6 +211,13 @@ export async function operatorRoute(request: Request, env: Env, engine: Engine):
           if (await decrypt(String(actual.value), env.APP_SECRET) !== (row.key === 'authentication' ? restoredAuthentication(plain) : plain)) throw new HttpError(409, 'Restored encrypted setting failed verification')
           row.value = String(actual.value)
         }
+        if (input.table === 'server_apps') {
+          row.enabled = 0
+          if (row.signing_secret) {
+            if (await decrypt(String(row.signing_secret), input.backupSecret!) !== await decrypt(String(actual.signing_secret), env.APP_SECRET)) throw new HttpError(409, 'Restored app signing secret failed verification')
+            row.signing_secret = String(actual.signing_secret)
+          }
+        }
         if (input.table === 'storage_configs') {
           if (await decrypt(String(row.config), input.backupSecret!) !== await decrypt(String(actual.config), env.APP_SECRET)) throw new HttpError(409, 'Restored storage credentials failed verification')
           row.config = String(actual.config)
@@ -244,6 +251,13 @@ export async function operatorRoute(request: Request, env: Env, engine: Engine):
         let value = await decrypt(String(row.value), input.backupSecret)
         if (row.key === 'authentication') value = restoredAuthentication(value)
         row.value = await encrypt(value, env.APP_SECRET)
+      }
+      if (table === 'server_apps') {
+        row.enabled = 0
+        if (row.signing_secret) {
+          if (!input.backupSecret) throw new HttpError(400, 'Backup encryption key is required')
+          row.signing_secret = await encrypt(await decrypt(String(row.signing_secret), input.backupSecret), env.APP_SECRET)
+        }
       }
       if (table === 'storage_configs') {
         if (!input.backupSecret) throw new HttpError(400, 'Backup encryption key is required')

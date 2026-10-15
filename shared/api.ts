@@ -1,5 +1,7 @@
+import { slackWebhookInputSchema, slackWebhookSchema, slackWebhookCredentialSchema, slackMessageSchema, appPolicySchema, appConfigSchema, appSchema, appCredentialSchema, webhookMessageSchema, commandInvokeSchema, commandResultSchema, commandRegistrySchema, appAuditSchema, appDeliverySchema } from './apps'
 import { z } from 'zod'
 import { operationsStatusSchema, backupPolicySchema, jobRequestSchema, jobSchema, releaseSchema } from './operations'
+import { permissionsResultSchema, roleInputSchema, roleResultSchema, memberRolesInputSchema, overridesInputSchema, auditEventSchema } from './contracts'
 import { passwordProofSchema, recoveryResetSchema, inviteInputSchema, inviteTokenSchema, inviteResultSchema } from './contracts'
 import { authenticationInputSchema, telegramIntegrationInputSchema, telegramIntegrationStatusSchema, telegramPreferencesInputSchema, telegramAccountStatusSchema } from './contracts'
 import {
@@ -35,6 +37,24 @@ export const endpoints = {
   backupPolicyUpdate: endpoint('PUT', '/api/installation/backup-policy', backupPolicySchema, backupPolicySchema),
   installationRelease: endpoint('GET', '/api/installation/release', none, releaseSchema),
   restoredIntegrations: endpoint('POST', '/api/installation/restored-integrations', z.object({ enable: z.literal(true) }), ok),
+  slackWebhooks: endpoint('GET', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks', none, z.array(slackWebhookSchema)),
+  slackWebhookCreate: endpoint('POST', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks', slackWebhookInputSchema, slackWebhookCredentialSchema),
+  slackWebhookRotate: endpoint('POST', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks/:webhookId/rotate', none, slackWebhookCredentialSchema),
+  slackWebhookRevoke: endpoint('DELETE', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks/:webhookId', none, ok),
+  slackWebhookPost: endpoint('POST', '/api/compat/slack/services/:workspaceId/:webhookId/:token', slackMessageSchema, z.literal('ok')),
+  appPolicy: endpoint('GET', '/api/installation/apps', none, appPolicySchema),
+  appPolicyUpdate: endpoint('PUT', '/api/installation/apps', appPolicySchema, appPolicySchema),
+  serverApps: endpoint('GET', '/api/workspaces/:workspaceId/apps', none, z.object({ apps: z.array(appSchema), policy: appPolicySchema })),
+  appInstall: endpoint('POST', '/api/workspaces/:workspaceId/apps', appConfigSchema, appCredentialSchema),
+  appUpdate: endpoint('PUT', '/api/workspaces/:workspaceId/apps/:appId', appConfigSchema, appSchema),
+  appRotate: endpoint('POST', '/api/workspaces/:workspaceId/apps/:appId/rotate', none, appCredentialSchema),
+  appUninstall: endpoint('DELETE', '/api/workspaces/:workspaceId/apps/:appId', none, ok),
+  appAudit: endpoint('GET', '/api/workspaces/:workspaceId/apps-audit', none, appAuditSchema),
+  appDeliveries: endpoint('GET', '/api/workspaces/:workspaceId/apps-deliveries', none, appDeliverySchema),
+  appPost: endpoint('POST', '/api/apps/:appId/messages', webhookMessageSchema, messageResultSchema),
+  commands: endpoint('GET', '/api/channels/:channelId/commands', none, commandRegistrySchema),
+  commandInvoke: endpoint('POST', '/api/channels/:channelId/commands', commandInvokeSchema, commandResultSchema),
+  commandResult: endpoint('GET', '/api/channels/:channelId/commands/:invocationId', none, commandResultSchema),
   runtime: endpoint('GET', '/api/runtime', none, z.object({ apiVersion: z.literal(API_VERSION), engine: engineSchema, auth: z.literal('better-auth'), realtime: z.literal('websocket'), build: z.object({ version: z.string(), commit: z.string(), apiVersion: z.number().int(), schema: z.string() }).optional() })),
   authStatus: endpoint('GET', '/api/auth/status', none, z.object({ initialized: z.boolean(), setupRequired: z.boolean().default(false), user: userSchema.nullable(), methods: authenticationInputSchema.optional() })),
   authentication: endpoint('GET', '/api/installation/authentication', none, authenticationInputSchema),
@@ -67,6 +87,14 @@ export const endpoints = {
   memberUnban: endpoint('DELETE', '/api/workspaces/:workspaceId/bans/:userId', none, ok),
   connectionLogin: endpoint('POST', '/api/connections/login', credentialsSchema, z.object({ token: z.string().min(1), user: userSchema })),
   liveTicket: endpoint('POST', '/api/workspaces/:workspaceId/live-ticket', none, z.object({ ticket: z.string().min(1) })),
+  permissions: endpoint('GET', '/api/workspaces/:workspaceId/permissions', none, permissionsResultSchema),
+  roleCreate: endpoint('POST', '/api/workspaces/:workspaceId/roles', roleInputSchema, roleResultSchema),
+  roleUpdate: endpoint('PUT', '/api/workspaces/:workspaceId/roles/:roleId', roleInputSchema, roleResultSchema),
+  roleDelete: endpoint('DELETE', '/api/workspaces/:workspaceId/roles/:roleId', none, ok),
+  memberRolesUpdate: endpoint('PUT', '/api/workspaces/:workspaceId/members/:userId/roles', memberRolesInputSchema, ok),
+  channelPermissions: endpoint('GET', '/api/channels/:channelId/permissions', none, overridesInputSchema),
+  channelPermissionsUpdate: endpoint('PUT', '/api/channels/:channelId/permissions', overridesInputSchema, ok),
+  audit: endpoint('GET', '/api/workspaces/:workspaceId/audit', none, z.array(auditEventSchema)),
   bootstrap: endpoint('GET', '/api/bootstrap', none, bootstrapSchema, z.object({ workspace: idSchema.optional() })),
   workspaceCreate: endpoint('POST', '/api/workspaces', workspaceSchema, created),
   workspaceUpdate: endpoint('PATCH', '/api/workspaces/:workspaceId', workspaceUpdateSchema, workspaceResultSchema),

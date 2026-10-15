@@ -1,6 +1,6 @@
 {
   "fromSchemas": [
-    "0008_fancy_vanisher"
+    "0011_fancy_vanisher"
   ],
   "migrations": "none"
 }

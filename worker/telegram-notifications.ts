@@ -1,3 +1,4 @@
+import { canReadChannel } from './permissions'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { authAccounts } from '../db/auth-schema'
@@ -65,6 +66,8 @@ export function mentionsUser(text: string, name: string) {
   return new RegExp(`(?:^|\\s)@${escaped}(?=$|[\\s.,!?:;])`, 'iu').test(text)
 }
 export async function queueTelegramNotifications(env: Env, workspaceId: string, message: Message) {
+  // Apps never create Telegram mention/reply alerts in this milestone.
+  if (message.bot) return
   const config = await authenticationConfig(env)
   if (!config.notifications || !config.botToken) return
   const recipients = await env.DB.prepare(`SELECT p.user_id AS userId, u.name FROM telegram_preferences p
@@ -102,6 +105,7 @@ export async function flushTelegramNotifications(env: Env) {
         .first<{ enabled: number; preview: number; allowed: number; muted: string; chatId: string; channelId: string; channel: string; workspaceId: string; text: string; threadId: string | null; recipientName: string; replyAuthorId: string | null; following: number }>()
       if (!delivery?.enabled || !delivery.allowed || z.array(z.string()).parse(JSON.parse(delivery.muted)).includes(delivery.channelId)
         || !(delivery.replyAuthorId === claimed.userId || delivery.following || mentionsUser(delivery.text, delivery.recipientName))) { status = 'skipped' }
+      else if (!await canReadChannel(env, claimed.userId, delivery.channelId)) status = 'skipped'
       else {
         const link = new URL(serverPath(delivery.workspaceId, delivery.channelId), env.AUTH_BASE_URL)
         if (delivery.threadId) link.searchParams.set('thread', delivery.threadId)

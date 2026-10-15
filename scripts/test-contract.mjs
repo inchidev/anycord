@@ -60,3 +60,26 @@ assert.equal(matchEndpoint('PATCH', '/api/workspaces/main').name, 'workspaceUpda
 assert.equal(matchEndpoint('PATCH', '/api/channels/general').name, 'channelUpdate')
 assert.equal(endpoints.workspaceUpdate.body.safeParse({ name: 'Server', initials: 'TOOLONG' }).success, false)
 assert.deepEqual(endpoints.channelUpdate.body.parse({ name: 'general', topic: 'Topic', kind: 'voice' }), { name: 'general', topic: 'Topic' })
+
+const { parseSlashCommand, CommandInputError } = await import(pathToFileURL(resolve('runtime/contracts.mjs')))
+const commands = [{ appId: 'aabb', appName: 'Echo', name: 'echo', description: 'Echo', arguments: [{ name: 'text', type: 'string', required: true }, { name: 'count', type: 'integer', required: true }, { name: 'enabled', type: 'boolean', required: false }] }]
+assert.deepEqual(parseSlashCommand('/echo "hello world" 2 true', commands), { appId: 'aabb', name: 'echo', arguments: { text: 'hello world', count: 2, enabled: true } })
+for (const text of ['/echo', '/echo text nope', '/echo text 2 yes', '/echo "unclosed 2', '/echo text 2 true extra', '/unknown']) assert.throws(() => parseSlashCommand(text, commands), CommandInputError)
+const ambiguous = [...commands, { ...commands[0], appId: 'bbcc' }]
+assert.throws(() => parseSlashCommand('/echo text 2', ambiguous), /Several apps/)
+// App IDs in production are UUIDs; encoded IDs are not accepted in slash syntax.
+assert.equal(parseSlashCommand('/echo@bbcc text 2', ambiguous).appId, 'bbcc')
+console.log('PASS: slash command quoting, typed positional arguments, missing/extra arguments and app disambiguation.')
+const { effectivePermissions, permissionKeys, isPermissionKey, supportsScope } = await import(pathToFileURL(resolve(existsSync('contracts.mjs') ? 'contracts.mjs' : 'runtime/contracts.mjs')))
+const everyone = 'everyone:server'
+const override = (subjectType, subjectId, permission, effect) => ({ subjectType, subjectId, permission, effect })
+const overrides = [override('role', everyone, 'channels.view', 'deny'), override('role', 'reader', 'channels.view', 'allow'), override('role', 'muted', 'channels.view', 'deny')]
+assert(effectivePermissions(['channels.view'], overrides, everyone, ['reader', 'muted'], 'alice').includes('channels.view'))
+assert(!effectivePermissions(['channels.view'], [...overrides, override('member', 'alice', 'channels.view', 'deny')], everyone, ['reader'], 'alice').includes('channels.view'))
+assert(!effectivePermissions([], [], everyone, [], 'alice').includes('roles.manage'))
+assert(!effectivePermissions(['invented.execute'], [override('member', 'alice', 'invented.execute', 'allow')], everyone, [], 'alice').length)
+assert.equal(isPermissionKey('invented.execute'), false)
+assert.equal(supportsScope('roles.manage', 'channel'), false)
+assert.equal(new Set(permissionKeys).size, permissionKeys.length)
+assert.equal(endpoints.roleCreate.body.safeParse({ name: 'Role', color: '#5865f2', position: 1, permissions: ['invented.execute'] }).success, false)
+console.log('PASS: role union and channel override precedence, default deny, unknown keys and scope registry.')

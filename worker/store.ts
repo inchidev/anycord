@@ -1,10 +1,11 @@
+import { requirePermission } from './permissions'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
 import type { Message, Thread, User } from '../shared/contracts'
 import { HttpError } from './security'
 import { authUsers, authAccounts } from '../db/auth-schema'
-import { publicProfileName, telegramProfileJoin } from './user-profiles'
+import { publicProfileName, publicProfileAvatar, telegramProfileJoin } from './user-profiles'
 
 export const database = (env: Env) => drizzle(env.DB, { schema })
 export async function requireMembership(env: Env, userId: string, workspaceId: string) {
@@ -15,7 +16,7 @@ export async function requireMembership(env: Env, userId: string, workspaceId: s
 export async function requireChannel(env: Env, user: User, channelId: string) {
   const channel = await database(env).select().from(schema.channels).where(eq(schema.channels.id, channelId)).get()
   if (!channel) throw new HttpError(404, 'Channel not found')
-  await requireMembership(env, user.id, channel.workspaceId)
+  await requirePermission(env, user.id, channel.workspaceId, 'channels.view', channelId)
   return channel
 }
 export async function getThreads(env: Env, channelId: string, threadId?: string, parentIds?: string[]): Promise<Thread[]> {
@@ -45,7 +46,7 @@ export async function getMessages(env: Env, channelId: string, userId: string, m
   if (focusId && !focus) throw new HttpError(404, 'Message not found')
   const rows = await db.select({
     id: schema.messages.id, channelId: schema.messages.channelId, authorId: schema.messages.authorId,
-    author: publicProfileName, avatarUrl: authUsers.image, color: schema.users.color, role: schema.users.role,
+    author: publicProfileName, avatarUrl: publicProfileAvatar, color: schema.users.color, role: schema.users.role,
     text: schema.messages.text, createdAt: schema.messages.createdAt, editedAt: schema.messages.editedAt,
     replyToId: schema.messages.replyToId, threadId: schema.messages.threadId,
   }).from(schema.messages).innerJoin(schema.users, eq(schema.users.id, schema.messages.authorId))

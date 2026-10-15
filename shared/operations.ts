@@ -12,9 +12,9 @@ export const releaseSchema = z.object({ version: stableVersion, commit: z.string
 
 // Explicit application tables. Sessions, OAuth challenges, live tickets,
 // active calls and pending deliveries are intentionally not replayed on restore.
-export const backupTables = ['app_migrations', 'users', 'auth_user', 'auth_account', 'workspaces', 'memberships', 'channels', 'messages', 'threads', 'reactions', 'settings', 'storage_configs', 'attachments', 'invitations', 'recovery_keys', 'workspace_bans', 'telegram_preferences', 'thread_followers'] as const
-export const transientTables = ['sessions', 'auth_session', 'auth_verification', 'live_tickets', 'huddle_participants', 'huddles', 'telegram_outbox'] as const
-export const guardedTables = [...backupTables, 'huddles', 'huddle_participants', 'telegram_outbox'] as const
+export const backupTables = ['app_migrations', 'users', 'auth_user', 'auth_account', 'workspaces', 'memberships', 'channels', 'roles', 'role_permissions', 'member_roles', 'channel_overrides', 'audit_events', 'server_apps', 'app_slack_webhooks', 'app_audit', 'app_message_requests', 'messages', 'threads', 'reactions', 'settings', 'storage_configs', 'attachments', 'invitations', 'recovery_keys', 'workspace_bans', 'telegram_preferences', 'thread_followers'] as const
+export const transientTables = ['sessions', 'auth_session', 'auth_verification', 'live_tickets', 'huddle_participants', 'huddles', 'telegram_outbox', 'app_outbox', 'app_invocations'] as const
+export const guardedTables = [...backupTables, 'huddles', 'huddle_participants', 'telegram_outbox', 'app_outbox', 'app_invocations'] as const
 export const tableNameSchema = z.enum(backupTables)
 export const rowSchema = z.record(z.string(), z.union([z.string(), z.number(), z.null()]))
 export const backupManifestSchema = z.object({

@@ -160,3 +160,101 @@ CREATE TRIGGER maintenance_telegram_outbox_delete BEFORE DELETE ON telegram_outb
 --> statement-breakpoint
 ALTER TABLE `installation_jobs` ADD `target_schema` text;--> statement-breakpoint
 ALTER TABLE `installation_jobs` ADD `target_api_version` integer;
+--> statement-breakpoint
+CREATE TRIGGER maintenance_roles_insert BEFORE INSERT ON roles WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_roles_update BEFORE UPDATE ON roles WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_roles_delete BEFORE DELETE ON roles WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_role_permissions_insert BEFORE INSERT ON role_permissions WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_role_permissions_update BEFORE UPDATE ON role_permissions WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_role_permissions_delete BEFORE DELETE ON role_permissions WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_member_roles_insert BEFORE INSERT ON member_roles WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_member_roles_update BEFORE UPDATE ON member_roles WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_member_roles_delete BEFORE DELETE ON member_roles WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_channel_overrides_insert BEFORE INSERT ON channel_overrides WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_channel_overrides_update BEFORE UPDATE ON channel_overrides WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_channel_overrides_delete BEFORE DELETE ON channel_overrides WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_audit_events_insert BEFORE INSERT ON audit_events WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_audit_events_update BEFORE UPDATE ON audit_events WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_audit_events_delete BEFORE DELETE ON audit_events WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_server_apps_insert BEFORE INSERT ON server_apps WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_server_apps_update BEFORE UPDATE ON server_apps WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_server_apps_delete BEFORE DELETE ON server_apps WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_audit_insert BEFORE INSERT ON app_audit WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_audit_update BEFORE UPDATE ON app_audit WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_audit_delete BEFORE DELETE ON app_audit WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_invocations_insert BEFORE INSERT ON app_invocations WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_invocations_update BEFORE UPDATE ON app_invocations WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_invocations_delete BEFORE DELETE ON app_invocations WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_message_requests_insert BEFORE INSERT ON app_message_requests WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_message_requests_update BEFORE UPDATE ON app_message_requests WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_message_requests_delete BEFORE DELETE ON app_message_requests WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_outbox_insert BEFORE INSERT ON app_outbox WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_outbox_update BEFORE UPDATE ON app_outbox WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_outbox_delete BEFORE DELETE ON app_outbox WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_slack_webhooks_insert BEFORE INSERT ON app_slack_webhooks WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_slack_webhooks_update BEFORE UPDATE ON app_slack_webhooks WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER maintenance_app_slack_webhooks_delete BEFORE DELETE ON app_slack_webhooks WHEN EXISTS (SELECT 1 FROM installation_state WHERE id=1 AND maintenance_job IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'Anycord maintenance: writes are paused'); END;

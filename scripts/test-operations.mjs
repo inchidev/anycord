@@ -64,6 +64,16 @@ try {
     const channel = (await source.app('/api/bootstrap?workspace=' + community, { cookie: owner.cookie })).data.channels[0].id
     const invite = (await source.app(`/api/workspaces/${community}/invites`, { method: 'POST', cookie: owner.cookie, body: { maxUses: 2, expiresInHours: 1 }, expected: 201 })).data
     await source.app('/api/invitations/accept', { method: 'POST', cookie: member.cookie, body: { token: invite.token } })
+    // Combined release recovery must preserve the permissions and app modules too.
+    const role = (await source.app(`/api/workspaces/${community}/roles`, { method: 'POST', cookie: owner.cookie, body: { name: 'Recovery role', color: '#5865f2', position: 1, permissions: ['reactions.add'] }, expected: 201 })).data
+    await source.app(`/api/workspaces/${community}/members/${member.data.user.id}/roles`, { method: 'PUT', cookie: owner.cookie, body: { roleIds: [role.id] } })
+    await source.app(`/api/channels/${channel}/permissions`, { method: 'PUT', cookie: owner.cookie, body: { overrides: [{ subjectType: 'member', subjectId: member.data.user.id, permission: 'attachments.upload', effect: 'deny' }] } })
+    await source.app('/api/installation/apps', { method: 'PUT', cookie: owner.cookie, body: { enabled: true, allowedOrigins: [] } })
+    const bot = (await source.app(`/api/workspaces/${community}/apps`, { method: 'POST', cookie: owner.cookie, body: { name: 'Recovery bot', avatarUrl: '', kind: 'webhook', channelIds: [channel], enabled: true, endpointUrl: '', events: [], commands: [] }, expected: 201 })).data
+    const webhook = (await source.app(`/api/workspaces/${community}/apps/${bot.app.id}/slack-webhooks`, { method: 'POST', cookie: owner.cookie, body: { channelId: channel }, expected: 201 })).data
+    const botPost = { id: randomUUID(), channelId: channel, text: 'Preserved bot message and receipt' }
+    const botResponse = await source.mf.dispatchFetch(source.origin + `/api/apps/${bot.app.id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${bot.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(botPost) })
+    assert.equal(botResponse.status, 201); await botResponse.body?.cancel()
     const messageId = randomUUID(), threadId = randomUUID()
     await source.app(`/api/channels/${channel}/messages`, { method: 'POST', cookie: owner.cookie, body: { id: messageId, text: 'Preserved root' }, expected: 201 })
     await source.app(`/api/channels/${channel}/threads`, { method: 'POST', cookie: member.cookie, body: { id: threadId, parentMessageId: messageId, name: 'Preserved thread' }, expected: 201 })
@@ -75,6 +85,12 @@ try {
     const attachment = (await source.app(`/api/channels/${channel}/attachments`, { method: 'POST', cookie: owner.cookie, body: { name: 'private.png', size: bytes.length }, expected: 201 })).data.id
     await source.app(`/api/attachments/${attachment}/upload`, { method: 'PUT', cookie: owner.cookie, body: bytes, raw: true })
     await source.app(`/api/channels/${channel}/messages`, { method: 'POST', cookie: owner.cookie, body: { id: randomUUID(), text: 'Private attachment', attachmentIds: [attachment] }, expected: 201 })
+    const appDb = await source.mf.getD1Database('DB')
+    const pendingId = randomUUID()
+    await appDb.batch([
+      appDb.prepare("INSERT INTO app_invocations (id,app_id,channel_id,user_id,request_hash,status,created_at) VALUES (?,?,?,?,'fixture','pending',?)").bind(pendingId,bot.app.id,channel,member.data.user.id,Date.now()),
+      appDb.prepare("INSERT INTO app_outbox (id,app_id,channel_id,type,payload,due_at,created_at) VALUES (?,?,?,'command.invoked','{}',?,?)").bind(pendingId,bot.app.id,channel,Date.now()+3600000,Date.now()),
+    ])
     const id = randomUUID(), runnerId = randomUUID()
     await source.app('/api/installation/operations', { method: 'POST', cookie: owner.cookie, body: { id, kind: 'backup' }, expected: 409 })
     await source.client('/heartbeat', { method: 'POST', body: {} })
@@ -87,6 +103,11 @@ try {
     await source.app(`/api/channels/${channel}/messages`, { method: 'POST', cookie: owner.cookie, body: { id: randomUUID(), text: 'Must not enter the snapshot' }, expected: 503 })
     const db = await source.mf.getD1Database('DB')
     await assert.rejects(db.prepare("UPDATE messages SET text='In-flight write' WHERE id=?").bind(messageId).run(), /maintenance/)
+    for (const table of ['roles', 'channel_overrides', 'server_apps', 'app_slack_webhooks', 'app_message_requests', 'app_outbox']) {
+      await assert.rejects(db.prepare(`UPDATE ${table} SET ${table === 'roles' ? 'name=name' : table === 'channel_overrides' ? 'effect=effect' : table === 'server_apps' ? 'enabled=enabled' : table === 'app_slack_webhooks' ? 'token_hash=token_hash' : table === 'app_message_requests' ? 'request_hash=request_hash' : 'status=status'}`).run(), /maintenance/)
+    }
+    const frozenWebhook = await source.mf.dispatchFetch(webhook.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Cannot bypass maintenance' }) })
+    assert.equal(frozenWebhook.status,503);assert.equal(await frozenWebhook.text(),'maintenance')
     const backup = await createBackup(source.client, claim.job, claim.key, source.config.backupDirectory)
     await verifyBackup(backup.path); assert.equal((await source.client('/status')).maintenance,false)
     const retentionDir=join(root,engine+'-retention');await mkdir(retentionDir)
@@ -122,7 +143,17 @@ try {
     await target.app('/api/bootstrap',{cookie:owner.cookie,expected:401})
     const signedIn=await target.app('/api/auth/login',{method:'POST',body:{name:'member',password:'correct-horse-battery'}})
     const restored=await target.app('/api/bootstrap?workspace='+community,{cookie:signedIn.cookie});assert(restored.data.workspaces.some(w=>w.id===community))
+    assert(restored.data.members.find(m=>m.id===member.data.user.id).roleIds.includes(role.id))
+    assert(!restored.data.channels.find(c=>c.id===channel).permissions.includes('attachments.upload'))
+    const targetDb=await target.mf.getD1Database('DB')
+    assert.equal(await targetDb.prepare('SELECT enabled FROM server_apps WHERE id=?').bind(bot.app.id).first('enabled'),0)
+    assert.equal(await targetDb.prepare('SELECT count(*) AS n FROM app_slack_webhooks WHERE id=?').bind(webhook.id).first('n'),1)
+    assert.equal(await targetDb.prepare('SELECT count(*) AS n FROM app_message_requests WHERE app_id=? AND request_id=?').bind(bot.app.id,botPost.id).first('n'),1)
+    for(const table of ['app_outbox','app_invocations']) assert.equal(await targetDb.prepare(`SELECT count(*) AS n FROM ${table}`).first('n'),0)
+    const restoredAppResponse=await target.mf.dispatchFetch(target.origin+`/api/apps/${bot.app.id}/messages`,{method:'POST',headers:{Authorization:`Bearer ${bot.token}`,'Content-Type':'application/json'},body:JSON.stringify({...botPost,id:randomUUID()})})
+    assert.equal(restoredAppResponse.status,403);await restoredAppResponse.body?.cancel()
     const history=(await target.app(`/api/channels/${channel}/messages`,{cookie:signedIn.cookie})).data;assert(history.some(m=>m.id===messageId&&m.text==='Preserved root'))
+    assert(history.some(m=>m.bot&&m.author==='Recovery bot'&&m.text===botPost.text))
     assert(history.some(m=>m.text===unicodeText),'Unicode, multiline and embedded NUL survive portable recovery')
     assert(history.find(m=>m.id===messageId).reactions.some(r=>r.emoji==='👍'&&r.mine&&r.count===1))
     assert(history.some(m=>m.text==='Preserved reply'&&m.replyToId===messageId&&m.reply?.text==='Preserved root'))

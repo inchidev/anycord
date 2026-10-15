@@ -1,3 +1,4 @@
+import { checkRoles } from './integration-roles.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtemp, cp, readFile, writeFile, mkdir, rm } from 'node:fs/promises'
@@ -30,7 +31,7 @@ let storageVars = ''
 for (const key of ['STORAGE_ENDPOINT','STORAGE_BUCKET','STORAGE_REGION','STORAGE_ACCESS_KEY_ID','STORAGE_SECRET_ACCESS_KEY']) if (process.env[key]) storageVars += `${key}=${JSON.stringify(process.env[key])}\n`
 if (storageVars) await writeFile(join(folder, '.dev.vars'), await readFile(join(folder, '.dev.vars'), 'utf8') + storageVars)
 const providerCalls = []
-let rejectAiTest = false, emptyAiTest = false
+let rejectAiTest = false, emptyAiTest = false, rejectParticipantRemoval = false
 const provider = createServer(async (request, response) => {
   let raw = ''; for await (const chunk of request) raw += chunk
   const body = raw ? JSON.parse(raw) : undefined
@@ -49,9 +50,10 @@ const provider = createServer(async (request, response) => {
   }
   assert.equal(request.headers.authorization, 'Bearer fake-test-token-never-send')
   let data = {}
-  if (request.url.endsWith('/presets')) data = [{ name: 'group_call_participant' }]
+  if (request.url.endsWith('/presets')) data = [{ name: 'group_call_participant' }, { name: 'listener', permissions: { media: { audio: { can_produce: 'NOT_ALLOWED' } }, can_change_participant_permissions: false, can_accept_production_requests: false } }]
   else if (request.url.endsWith('/meetings')) { assert.equal(body.record_on_start, false); data = { id: crypto.randomUUID() } }
-  else if (request.url.endsWith('/participants') && request.method === 'POST') { assert.equal(body.preset_name, 'group_call_participant'); data = { id: crypto.randomUUID(), token: 'mock-participant-token' } }
+  else if (request.url.endsWith('/participants') && request.method === 'POST') { assert(['group_call_participant', 'listener'].includes(body.preset_name)); data = { id: crypto.randomUUID(), token: 'mock-participant-token' } }
+  if (request.method === 'DELETE' && rejectParticipantRemoval) { response.statusCode = 502; response.end(JSON.stringify({ success: false })); return }
   response.end(JSON.stringify({ success: true, data }))
 })
 await new Promise((resolve) => provider.listen(19877, '127.0.0.1', resolve))
@@ -374,6 +376,7 @@ try {
   assert.equal(after.data.find((row) => row.id === message.id).text, 'Edited and persisted')
   const retainedThread = await api(`/api/channels/general/threads/${thread.data.id}`, { cookie: bob.cookie }); assert.equal(retainedThread.data.messages[0].text, 'Thread reply'); assert.equal(retainedThread.data.parent, null)
   const savedConfig = await api('/api/integrations', { cookie: alice.cookie }); assert(savedConfig.data.realtimeConfigured)
+  await checkRoles({ api, connect, owner: alice, base, voice: { calls: providerCalls, rejectRemoval: value => { rejectParticipantRemoval = value } } })
   const liveAfterRestart = await connect(alice.cookie)
   const closed = once(liveAfterRestart.ws, 'close')
   await api('/api/auth/logout', { cookie: alice.cookie, method: 'POST' })

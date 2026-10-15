@@ -11,11 +11,11 @@
 - Whole-installation backup/restore and explicit release updates use a trusted operator runner, external recovery storage and a maintenance window. See [operations](operations.md) for setup, protection, compatibility, interruption recovery and validation limits.
 - Voice huddles use the installation's configured RealtimeKit app and participant preset. The huddle includes microphone selection, output selection where supported by the browser, and mute/unmute. Provider tests use a local double; two-device live audio still needs actual credentials and browser permission checks.
 
-## Next: Discord-style roles and channel permissions
+## Roles and channel permissions
 
-Introduce server-owned custom roles, an everyone role, multiple roles per member, role ordering and named permission bits. Start with managing channels, inviting members, moderating messages, removing/banning members and joining/speaking in voice channels. Then add per-channel overrides with documented precedence. The server owner retains control; role management must not allow granting permissions above one's own authority. UI and every HTTP/realtime/media authorization path must use the same effective-permission evaluator.
+Custom server roles, @everyone, multiple roles per member, position-based management hierarchy and explicit string permission keys are implemented together with per-channel role/member allow/deny overrides. Server Settings includes role editing, member assignments, channel permissions and audit history. HTTP, realtime, search, private files, voice admission and notifications enforce the same permission model. Installation ownership remains separate.
 
-Existing installation ownership must stay separate from community roles. A community role must not grant access to installation secrets or unrelated servers. Do not implement disconnected UI-only roles.
+See [roles and permissions](permissions.md) for precedence, extension points, migration behavior, validation and the initial conservative huddle-revocation policy. GitHub/repository scopes and agent delegation build on this foundation later. Installation upgrades follow the explicit versioned release procedures.
 
 ## Decisions still open
 
@@ -28,3 +28,7 @@ Existing installation ownership must stay separate from community roles. A commu
 The initial `main` server still accepts newly registered local accounts. Other servers require membership through invitation or creation. A removed member may rejoin using another valid invitation; a banned member cannot until unbanned. Removing a ban does not automatically restore membership. A ban applies to the account on that server, not to other installations or newly created identities.
 
 Invitations are generated as `/invite#token=…` links, so the secret is not part of the page's HTTP URL. The client temporarily saves a pending token in session storage across sign-in and clears it on acceptance. Invitation tokens and recovery keys are never returned by listing/status endpoints. Copy a newly created invitation immediately; its secret cannot be retrieved later.
+
+### Server apps first milestone (#9)
+
+Server owners can install scoped incoming webhooks, including channel-bound Slack-compatible text/ok URLs and the sample Ping bot, configure identities/channel grants, register validated slash commands, rotate credentials, disable or uninstall apps, and inspect audit/delivery status. Installation owners enable third-party apps and approve outbound origins. Signed message/command events use persistent retry leases and stable IDs; receiver examples demonstrate durable deduplication. See [apps](apps.md). Richer bot APIs, deferred command callbacks and Discord API compatibility are outside this milestone.

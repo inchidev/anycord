@@ -78,6 +78,7 @@ export async function verifyBackup(root) {
       assert.deepEqual(Object.keys(row).sort(), [...table.columns].sort(), 'Backup record columns differ from manifest')
       assert(Object.values(row).every(v => v === null || typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))), 'Backup values must be SQLite scalar values')
       if (table.name === 'settings' && ['authentication', 'openrouterKey', 'realtimeToken'].includes(row.key) && row.value) await decryptSetting(row.value, secrets.APP_SECRET)
+      if (table.name === 'server_apps' && row.signing_secret) await decryptSetting(row.signing_secret, secrets.APP_SECRET)
       if (table.name === 'storage_configs') await decryptSetting(row.config, secrets.APP_SECRET)
       count++
     }
@@ -145,7 +146,7 @@ export async function restoreBackup(client, backupPath, runnerId, { resumeId } =
     await client(`/jobs/${id}/restore-reset`, { method: 'POST', key, body: {} })
     // Messages/threads have cyclic references. Insert messages with null links,
     // restore all parents/threads, then reattach the original references.
-    const order = ['app_migrations', 'users', 'auth_user', 'auth_account', 'workspaces', 'memberships', 'channels', 'settings', 'storage_configs', 'messages', 'threads', 'reactions', 'attachments', 'invitations', 'recovery_keys', 'workspace_bans', 'telegram_preferences', 'thread_followers']
+    const order = backupTables
     async function restoreTable(name, links = false) {
       const table = manifest.tables.find(t => t.name === name); let rows = []
       const send = async () => { if (rows.length) await client(`/jobs/${id}/tables/${name}`, { method: 'POST', key, body: { rows, links, backupSecret: secrets.APP_SECRET } }); rows = [] }

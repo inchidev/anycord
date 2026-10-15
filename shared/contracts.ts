@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { permissionKeys } from './permissions'
 export const AUTH_SESSION_CLOSE_CODE = 4001
 
 export const authenticationInputSchema = z.object({
@@ -55,14 +56,15 @@ export const integrationSchema = z.object({
   realtimeToken: z.string().trim().max(512).optional(),
   realtimeAccountId: z.string().trim().max(64).default(''),
   realtimeAppId: z.string().trim().max(64).default(''),
+  realtimeListenerPreset: z.string().trim().max(80).default(''),
   realtimePreset: z.string().trim().min(1).max(80).default('group_call_participant'),
   openrouterKey: z.string().trim().max(512).optional(),
   aiModel: z.string().trim().max(120).default('openai/gpt-4.1-mini'),
 })
 // IDs are opaque: seeded and migrated IDs are not necessarily UUIDs.
 export const userSchema = z.object({ id: idSchema, name: z.string(), color: z.string(), role: z.string(), avatarUrl: z.string().nullable().optional(), telegram: z.boolean().optional() })
-export const workspaceResultSchema = z.object({ id: idSchema, name: z.string(), initials: z.string(), role: z.string() })
-export const channelResultSchema = z.object({ id: idSchema, workspaceId: idSchema, name: z.string(), topic: z.string(), kind: z.enum(['text', 'voice']) })
+export const workspaceResultSchema = z.object({ id: idSchema, name: z.string(), initials: z.string(), role: z.string(), permissions: z.array(z.string()).optional() })
+export const channelResultSchema = z.object({ id: idSchema, workspaceId: idSchema, name: z.string(), topic: z.string(), kind: z.enum(['text', 'voice']), permissions: z.array(z.string()).optional() })
 export const threadSummarySchema = z.object({ id: idSchema, name: z.string(), messageCount: z.number().int().nonnegative() })
 export const threadSchema = threadSummarySchema.extend({ channelId: idSchema, parentMessageId: idSchema.nullable(), authorId: idSchema, createdAt: z.number().int() })
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
@@ -78,10 +80,10 @@ export const messageResultSchema = z.object({
   replyToId: idSchema.nullable(), threadId: idSchema.nullable(),
   reply: z.object({ id: idSchema, author: z.string(), text: z.string() }).nullable(), thread: threadSummarySchema.nullable(),
 })
-export const memberSchema = userSchema.extend({ workspaceRole: z.string() })
+export const memberSchema = userSchema.extend({ workspaceRole: z.string(), roleIds: z.array(idSchema).optional(), highestRolePosition: z.number().optional() })
 export const bootstrapSchema = z.object({ user: userSchema, workspaces: z.array(workspaceResultSchema), channels: z.array(channelResultSchema), members: z.array(memberSchema) })
 export const integrationsSchema = z.object({
-  realtimeConfigured: z.boolean(), realtimeAccountId: z.string(), realtimeAppId: z.string(), realtimePreset: z.string(),
+  realtimeConfigured: z.boolean(), realtimeAccountId: z.string(), realtimeAppId: z.string(), realtimePreset: z.string(), realtimeListenerPreset: z.string().default(''),
   aiConfigured: z.boolean(), aiModel: z.string(), email: z.literal('later'),
 })
 export const searchResultSchema = z.object({ id: idSchema, text: z.string(), channelId: idSchema, channel: z.string(), author: z.string(), createdAt: z.number().int(), threadId: idSchema.nullable() })
@@ -90,6 +92,7 @@ export const liveEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('refresh'), channelId: idSchema.optional() }),
   z.object({ type: z.literal('presence'), users: z.array(idSchema) }),
   z.object({ type: z.literal('typing'), userId: idSchema, name: z.string(), channelId: idSchema, threadId: idSchema.optional() }),
+  z.object({ type: z.literal('permissions'), endHuddles: z.boolean().default(false) }),
   z.object({ type: z.literal('ready') }),
 ])
 export const liveClientEventSchema = z.object({ type: z.literal('typing'), channelId: idSchema.max(64), threadId: idSchema.optional() })
@@ -102,3 +105,12 @@ export type Bootstrap = z.infer<typeof bootstrapSchema>
 export type Integrations = z.infer<typeof integrationsSchema>
 export type LiveEvent = z.infer<typeof liveEventSchema>
 export type Thread = z.infer<typeof threadSchema>
+
+export const permissionKeySchema = z.enum(permissionKeys)
+export const roleInputSchema = z.object({ name: z.string().trim().min(1).max(64), color: z.string().regex(/^#[a-fA-F0-9]{6}$/), position: z.number().int().min(0).max(10000), permissions: z.array(permissionKeySchema).max(100).refine(v => new Set(v).size === v.length) })
+export const roleResultSchema = roleInputSchema.extend({ id: idSchema, workspaceId: idSchema })
+export const memberRolesInputSchema = z.object({ roleIds: z.array(idSchema).max(100).refine(v => new Set(v).size === v.length) })
+export const overrideSchema = z.object({ subjectType: z.enum(['role', 'member']), subjectId: idSchema, permission: permissionKeySchema, effect: z.enum(['allow', 'deny']) })
+export const overridesInputSchema = z.object({ overrides: z.array(overrideSchema).max(500).refine(v => new Set(v.map(i => `${i.subjectType}:${i.subjectId}:${i.permission}`)).size === v.length, 'Duplicate permission override') })
+export const permissionsResultSchema = z.object({ roles: z.array(roleResultSchema), permissions: z.array(z.string()), highestRolePosition: z.number(), owner: z.boolean(), definitions: z.array(z.object({ key: z.string(), label: z.string(), description: z.string(), scopes: z.array(z.enum(['server', 'channel'])) })) })
+export const auditEventSchema = z.object({ id: idSchema, actorId: idSchema, action: z.string(), targetId: idSchema, detail: z.string(), createdAt: z.number() })

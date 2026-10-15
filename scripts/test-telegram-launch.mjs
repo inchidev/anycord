@@ -1,3 +1,4 @@
+import { defaultPermissions } from '../runtime/contracts.mjs'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -70,7 +71,7 @@ try {
       } else if (path === '/api/auth/status') body = { initialized: true, setupRequired: false, user: authenticated ? user : null, methods: { passwordLogin: true, registration: true, telegramLogin: true, miniAppLogin: true } }
       else if (path === '/api/runtime') body = { apiVersion: 1, engine: 'cloudflare', auth: 'better-auth', realtime: 'websocket', build }
       else if (path === '/api/workspaces') body = []
-      else if (path === '/api/bootstrap') body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member' }], channels: [{ id: 'general', workspaceId: 'main', name: 'general', kind: 'text', topic: '' }], members: [] }
+      else if (path === '/api/bootstrap') body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member', permissions: defaultPermissions }], channels: [{ id: 'general', workspaceId: 'main', name: 'general', kind: 'text', topic: '', permissions: defaultPermissions }], members: [] }
       else if (path.endsWith('/messages')) body = []
       await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     })
@@ -158,7 +159,7 @@ try {
       } else if (path === '/api/auth/status') body = { initialized: mode !== 'setup', user: authenticated ? user : null, methods: { passwordLogin: true, registration: true, telegramLogin: true, miniAppLogin: mode !== 'disabled' } }
       else if (path === '/api/account/telegram/profile') { profileCalls++; assert.equal(route.request().postDataJSON().initData, signed); body = mode === 'profile-mismatch' ? { ...user, id: 'different-account', name: 'Someone else' } : user }
       else if (path === '/api/auth/logout') { authenticated = false; body = { success: true } }
-      else if (path === '/api/bootstrap') body = { user, workspaces: mode === 'existing-session' ? [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member' }] : [], channels: [], members: [] }
+      else if (path === '/api/bootstrap') body = { user, workspaces: mode === 'existing-session' ? [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member', permissions: defaultPermissions }] : [], channels: [], members: [] }
       else if (path === '/api/runtime') body = { apiVersion: 1, engine: 'cloudflare', auth: 'better-auth', realtime: 'websocket', build }
       await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     })
