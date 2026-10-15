@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
+import { integer, sqliteTable, text, index, primaryKey, foreignKey, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(), name: text('name').notNull().unique(),
@@ -74,3 +74,26 @@ export const telegramOutbox = sqliteTable('telegram_outbox', {
   attempts: integer('attempts').notNull().default(0), dueAt: integer('due_at').notNull(),
   status: text('status').notNull().default('pending'),
 }, t => [index('telegram_outbox_due').on(t.status, t.dueAt)])
+
+export const roles = sqliteTable('roles', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(), color: text('color').notNull().default('#949ba4'), position: integer('position').notNull(),
+}, t => [uniqueIndex('roles_workspace_id').on(t.workspaceId, t.id), index('roles_workspace_position').on(t.workspaceId, t.position)])
+export const rolePermissions = sqliteTable('role_permissions', {
+  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }), permission: text('permission').notNull(),
+}, t => [primaryKey({ columns: [t.roleId, t.permission] })])
+export const memberRoles = sqliteTable('member_roles', {
+  workspaceId: text('workspace_id').notNull(), userId: text('user_id').notNull(), roleId: text('role_id').notNull(),
+}, t => [primaryKey({ columns: [t.workspaceId, t.userId, t.roleId] }),
+  foreignKey({ columns: [t.workspaceId, t.roleId], foreignColumns: [roles.workspaceId, roles.id] }).onDelete('cascade'),
+  foreignKey({ columns: [t.userId, t.workspaceId], foreignColumns: [memberships.userId, memberships.workspaceId] }).onDelete('cascade')])
+export const channelOverrides = sqliteTable('channel_overrides', {
+  channelId: text('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+  subjectType: text('subject_type', { enum: ['role', 'member'] }).notNull(), subjectId: text('subject_id').notNull(),
+  permission: text('permission').notNull(), effect: text('effect', { enum: ['allow', 'deny'] }).notNull(),
+}, t => [primaryKey({ columns: [t.channelId, t.subjectType, t.subjectId, t.permission] })])
+export const auditEvents = sqliteTable('audit_events', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  actorId: text('actor_id').notNull(), action: text('action').notNull(), targetId: text('target_id').notNull(),
+  detail: text('detail').notNull(), createdAt: integer('created_at').notNull(),
+}, t => [index('audit_workspace_time').on(t.workspaceId, t.createdAt)])

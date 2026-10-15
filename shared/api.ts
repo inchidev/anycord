@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { permissionsResultSchema, roleInputSchema, roleResultSchema, memberRolesInputSchema, overridesInputSchema, auditEventSchema } from './contracts'
 import { passwordProofSchema, recoveryResetSchema, inviteInputSchema, inviteTokenSchema, inviteResultSchema } from './contracts'
 import { authenticationInputSchema, telegramIntegrationInputSchema, telegramIntegrationStatusSchema, telegramPreferencesInputSchema, telegramAccountStatusSchema } from './contracts'
 import {
@@ -60,6 +61,14 @@ export const endpoints = {
   memberUnban: endpoint('DELETE', '/api/workspaces/:workspaceId/bans/:userId', none, ok),
   connectionLogin: endpoint('POST', '/api/connections/login', credentialsSchema, z.object({ token: z.string().min(1), user: userSchema })),
   liveTicket: endpoint('POST', '/api/workspaces/:workspaceId/live-ticket', none, z.object({ ticket: z.string().min(1) })),
+  permissions: endpoint('GET', '/api/workspaces/:workspaceId/permissions', none, permissionsResultSchema),
+  roleCreate: endpoint('POST', '/api/workspaces/:workspaceId/roles', roleInputSchema, roleResultSchema),
+  roleUpdate: endpoint('PUT', '/api/workspaces/:workspaceId/roles/:roleId', roleInputSchema, roleResultSchema),
+  roleDelete: endpoint('DELETE', '/api/workspaces/:workspaceId/roles/:roleId', none, ok),
+  memberRolesUpdate: endpoint('PUT', '/api/workspaces/:workspaceId/members/:userId/roles', memberRolesInputSchema, ok),
+  channelPermissions: endpoint('GET', '/api/channels/:channelId/permissions', none, overridesInputSchema),
+  channelPermissionsUpdate: endpoint('PUT', '/api/channels/:channelId/permissions', overridesInputSchema, ok),
+  audit: endpoint('GET', '/api/workspaces/:workspaceId/audit', none, z.array(auditEventSchema)),
   bootstrap: endpoint('GET', '/api/bootstrap', none, bootstrapSchema, z.object({ workspace: idSchema.optional() })),
   workspaceCreate: endpoint('POST', '/api/workspaces', workspaceSchema, created),
   workspaceUpdate: endpoint('PATCH', '/api/workspaces/:workspaceId', workspaceUpdateSchema, workspaceResultSchema),

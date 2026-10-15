@@ -60,3 +60,17 @@ assert.equal(matchEndpoint('PATCH', '/api/workspaces/main').name, 'workspaceUpda
 assert.equal(matchEndpoint('PATCH', '/api/channels/general').name, 'channelUpdate')
 assert.equal(endpoints.workspaceUpdate.body.safeParse({ name: 'Server', initials: 'TOOLONG' }).success, false)
 assert.deepEqual(endpoints.channelUpdate.body.parse({ name: 'general', topic: 'Topic', kind: 'voice' }), { name: 'general', topic: 'Topic' })
+
+const { effectivePermissions, permissionKeys, isPermissionKey, supportsScope } = await import(pathToFileURL(resolve(existsSync('contracts.mjs') ? 'contracts.mjs' : 'runtime/contracts.mjs')))
+const everyone = 'everyone:server'
+const override = (subjectType, subjectId, permission, effect) => ({ subjectType, subjectId, permission, effect })
+const overrides = [override('role', everyone, 'channels.view', 'deny'), override('role', 'reader', 'channels.view', 'allow'), override('role', 'muted', 'channels.view', 'deny')]
+assert(effectivePermissions(['channels.view'], overrides, everyone, ['reader', 'muted'], 'alice').includes('channels.view'))
+assert(!effectivePermissions(['channels.view'], [...overrides, override('member', 'alice', 'channels.view', 'deny')], everyone, ['reader'], 'alice').includes('channels.view'))
+assert(!effectivePermissions([], [], everyone, [], 'alice').includes('roles.manage'))
+assert(!effectivePermissions(['invented.execute'], [override('member', 'alice', 'invented.execute', 'allow')], everyone, [], 'alice').length)
+assert.equal(isPermissionKey('invented.execute'), false)
+assert.equal(supportsScope('roles.manage', 'channel'), false)
+assert.equal(new Set(permissionKeys).size, permissionKeys.length)
+assert.equal(endpoints.roleCreate.body.safeParse({ name: 'Role', color: '#5865f2', position: 1, permissions: ['invented.execute'] }).success, false)
+console.log('PASS: role union and channel override precedence, default deny, unknown keys and scope registry.')

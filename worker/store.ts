@@ -1,3 +1,4 @@
+import { requirePermission } from './permissions'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import * as schema from '../db/schema'
@@ -15,7 +16,7 @@ export async function requireMembership(env: Env, userId: string, workspaceId: s
 export async function requireChannel(env: Env, user: User, channelId: string) {
   const channel = await database(env).select().from(schema.channels).where(eq(schema.channels.id, channelId)).get()
   if (!channel) throw new HttpError(404, 'Channel not found')
-  await requireMembership(env, user.id, channel.workspaceId)
+  await requirePermission(env, user.id, channel.workspaceId, 'channels.view', channelId)
   return channel
 }
 export async function getThreads(env: Env, channelId: string, threadId?: string, parentIds?: string[]): Promise<Thread[]> {

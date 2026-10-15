@@ -1,7 +1,9 @@
+import { requirePermission, serverAccess, initializeRoles, permissionsView, type PermissionMutation } from './permissions'
+import { roleInputSchema, memberRolesInputSchema, overridesInputSchema } from '../shared/contracts'
 import { z, ZodError } from 'zod'
 import { inviteTokenSchema, inviteInputSchema, recoveryResetSchema, passwordProofSchema } from '../shared/contracts'
-import { generateRecoveryKeys, resetWithRecoveryKey, randomToken, requireServerOwner, previewInvite, acceptInvite } from './access'
-import { and, eq, sql, desc } from 'drizzle-orm'
+import { generateRecoveryKeys, resetWithRecoveryKey, randomToken, previewInvite, acceptInvite } from './access'
+import { and, eq, sql, desc, inArray } from 'drizzle-orm'
 import * as tables from '../db/schema'
 import { channelSchema, credentialsSchema, editMessageSchema, integrationSchema, messageSchema, reactionSchema, threadCreateSchema, workspaceSchema, workspaceUpdateSchema, channelUpdateSchema } from '../shared/contracts'
 import { API_VERSION, matchEndpoint, matchLivePath } from '../shared/api'
@@ -194,7 +196,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
   }
   if (endpoint && ['invites', 'inviteCreate', 'inviteRevoke', 'memberRemove', 'memberBan', 'memberUnban', 'bans'].includes(endpoint.name)) {
     const workspaceId = endpoint.params.workspaceId!
-    await requireServerOwner(env, user.id, workspaceId)
+    await requirePermission(env, user.id, workspaceId, endpoint.name === 'memberRemove' ? 'members.remove' : ['memberBan', 'memberUnban', 'bans'].includes(endpoint.name) ? 'members.ban' : 'invites.manage')
     if (endpoint.name === 'invites') return json(await db.select({ id: tables.invitations.id, createdAt: tables.invitations.createdAt, expiresAt: tables.invitations.expiresAt, maxUses: tables.invitations.maxUses, uses: tables.invitations.uses }).from(tables.invitations).where(eq(tables.invitations.workspaceId, workspaceId)).orderBy(desc(tables.invitations.createdAt)).all())
     if (endpoint.name === 'inviteCreate') {
       const input = inviteInputSchema.parse(await readBody(request))
@@ -281,16 +283,42 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can change file storage')
     return json(endpoint.name === 'storageTest' ? await testStorage(env) : await updateStorage(env, request))
   }
+  if (endpoint?.name === 'permissions') return json(await permissionsView(env, user.id, endpoint.params.workspaceId!))
+  if (endpoint?.name === 'audit') {
+    const workspaceId = endpoint.params.workspaceId!
+    await requirePermission(env, user.id, workspaceId, 'audit.view')
+    return json(await db.select().from(tables.auditEvents).where(eq(tables.auditEvents.workspaceId, workspaceId)).orderBy(desc(tables.auditEvents.createdAt)).limit(100).all())
+  }
+  if (endpoint && ['roleCreate', 'roleUpdate', 'roleDelete', 'memberRolesUpdate', 'channelPermissions', 'channelPermissionsUpdate'].includes(endpoint.name)) {
+    let workspaceId = endpoint.params.workspaceId!
+    if (endpoint.params.channelId) {
+      const channel = await requireChannel(env, user, endpoint.params.channelId)
+      workspaceId = channel.workspaceId
+      await requirePermission(env, user.id, workspaceId, 'channels.permissions', channel.id)
+      if (endpoint.name === 'channelPermissions') return json({ overrides: await db.select().from(tables.channelOverrides).where(eq(tables.channelOverrides.channelId, channel.id)).all() })
+    }
+    let action: PermissionMutation
+    if (endpoint.name === 'roleCreate') action = { kind: 'create', input: roleInputSchema.parse(await readBody(request)) }
+    else if (endpoint.name === 'roleUpdate') action = { kind: 'update', roleId: endpoint.params.roleId!, input: roleInputSchema.parse(await readBody(request)) }
+    else if (endpoint.name === 'roleDelete') action = { kind: 'delete', roleId: endpoint.params.roleId! }
+    else if (endpoint.name === 'memberRolesUpdate') action = { kind: 'assign', userId: endpoint.params.userId!, input: memberRolesInputSchema.parse(await readBody(request)) }
+    else action = { kind: 'overrides', channelId: endpoint.params.channelId!, input: overridesInputSchema.parse(await readBody(request)) }
+    const result = await hub(env, workspaceId).mutatePermissions(workspaceId, user.id, action)
+    if (!result.ok) throw new HttpError(result.status, result.message)
+    return json(result.value, endpoint.name === 'roleCreate' ? 201 : 200)
+  }
   if (endpoint?.name === 'bootstrap') {
     const spaces = await db.select({ id: tables.workspaces.id, name: tables.workspaces.name, initials: tables.workspaces.initials, role: tables.memberships.role })
       .from(tables.workspaces).innerJoin(tables.memberships, and(eq(tables.memberships.workspaceId, tables.workspaces.id), eq(tables.memberships.userId, user.id))).all()
     const workspaceId = url.searchParams.get('workspace') || spaces[0]?.id || 'main'
-    await requireMembership(env, user.id, workspaceId)
-    const channels = await db.select().from(tables.channels).where(eq(tables.channels.workspaceId, workspaceId)).orderBy(tables.channels.position).all()
+    const access = await serverAccess(env, user.id, workspaceId)
+    const allChannels = await db.select().from(tables.channels).where(eq(tables.channels.workspaceId, workspaceId)).orderBy(tables.channels.position).all()
     const members = await db.select({ ...profileColumns, workspaceRole: tables.memberships.role }).from(tables.users)
       .leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin)
       .innerJoin(tables.memberships, and(eq(tables.memberships.userId, tables.users.id), eq(tables.memberships.workspaceId, workspaceId))).all()
-    return json({ user, workspaces: spaces, channels, members })
+    const channels = allChannels.map(item => ({ ...item, permissions: access.channelPermissions(item.id) })).filter(item => item.permissions.includes('channels.view'))
+    const assignments = await db.select().from(tables.memberRoles).where(eq(tables.memberRoles.workspaceId, workspaceId)).all()
+    return json({ user, workspaces: spaces.map(space => space.id === workspaceId ? { ...space, permissions: access.permissions } : space), channels, members: members.map(member => ({ ...member, roleIds: assignments.filter(item => item.userId === member.id).map(item => item.roleId), highestRolePosition: member.workspaceRole === 'owner' ? 10001 : Math.max(0, ...access.roles.filter(role => assignments.some(item => item.userId === member.id && item.roleId === role.id)).map(role => role.position)) })) })
   }
   if (endpoint?.name === 'workspaceCreate') {
     if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can create servers')
@@ -301,12 +329,13 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       db.insert(tables.memberships).values({ userId: user.id, workspaceId: id, role: 'owner' }),
       db.insert(tables.channels).values({ id: crypto.randomUUID(), workspaceId: id, name: 'general', topic: 'The beginning of something good.', kind: 'text', position: 0 }),
     ])
+    await initializeRoles(env, id)
     return json({ id }, 201)
   }
   if (endpoint?.name === 'workspaceUpdate') {
     const workspaceId = endpoint.params.workspaceId!
     const membership = await requireMembership(env, user.id, workspaceId)
-    if (membership.role !== 'owner') throw new HttpError(403, 'Only the server owner can change server settings')
+    await requirePermission(env, user.id, workspaceId, 'server.manage')
     const input = workspaceUpdateSchema.parse(await readBody(request))
     const workspace = await db.update(tables.workspaces).set(input).where(eq(tables.workspaces.id, workspaceId)).returning().get()
     if (!workspace) throw new HttpError(404, 'Server not found')
@@ -326,8 +355,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
   }
   if (endpoint?.name === 'channelCreate') {
     const workspaceId = endpoint.params.workspaceId!
-    const membership = await requireMembership(env, user.id, workspaceId)
-    if (membership.role !== 'owner') throw new HttpError(403, 'Only the server owner can create channels')
+    await requirePermission(env, user.id, workspaceId, 'channels.manage')
     const input = channelSchema.parse(await readBody(request)), id = crypto.randomUUID()
     await db.insert(tables.channels).values({ id, workspaceId, ...input, position: Date.now() }).run()
     await publish(env, workspaceId, { type: 'refresh' })
@@ -336,18 +364,30 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
   if (endpoint?.name === 'search') {
     const workspaceId = url.searchParams.get('workspace') || 'main'
     await requireMembership(env, user.id, workspaceId)
+    const access = await serverAccess(env, user.id, workspaceId)
+    const allChannels = await db.select({ id: tables.channels.id }).from(tables.channels).where(eq(tables.channels.workspaceId, workspaceId)).all()
+    const visible = allChannels.filter(item => { const permissions = access.channelPermissions(item.id); return permissions.includes('channels.view') && permissions.includes('messages.read') }).map(item => item.id)
+    if (!visible.length) return json([])
     const q = (url.searchParams.get('q') || '').trim().slice(0, 100)
     if (!q) return json([])
-    const rows = await db.select({ id: tables.messages.id, text: tables.messages.text, channelId: tables.channels.id, channel: tables.channels.name, authorId: tables.users.id, author: publicProfileName, createdAt: tables.messages.createdAt, threadId: tables.messages.threadId })
+    const searchRows = (ids?: string[]) => db.select({ id: tables.messages.id, text: tables.messages.text, channelId: tables.channels.id, channel: tables.channels.name, authorId: tables.users.id, author: publicProfileName, createdAt: tables.messages.createdAt, threadId: tables.messages.threadId })
       .from(tables.messages).innerJoin(tables.channels, eq(tables.channels.id, tables.messages.channelId)).innerJoin(tables.users, eq(tables.users.id, tables.messages.authorId))
       .leftJoin(authUsers, eq(authUsers.id, tables.users.id)).leftJoin(authAccounts, telegramProfileJoin)
-      .where(and(eq(tables.channels.workspaceId, workspaceId), sql`instr(lower(${tables.messages.text}), lower(${q})) > 0`))
+      .where(and(eq(tables.channels.workspaceId, workspaceId), ids ? inArray(tables.channels.id, ids) : undefined, sql`instr(lower(${tables.messages.text}), lower(${q})) > 0`))
       .orderBy(desc(tables.messages.createdAt)).limit(40).all()
-    return json(rows.map(({ authorId, ...row }) => ({ ...row, author: authorId === 'system' ? 'Anycord' : row.author })))
+    const rows: Awaited<ReturnType<typeof searchRows>> = []
+    if (visible.length === allChannels.length) rows.push(...await searchRows())
+    else for (let i = 0; i < visible.length; i += 80) rows.push(...await searchRows(visible.slice(i, i + 80)))
+    rows.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+    return json(rows.slice(0, 40).map(({ authorId, ...row }) => ({ ...row, author: authorId === 'system' ? 'Anycord' : row.author })))
   }
   if (endpoint?.params.channelId) {
     const channelId = endpoint.params.channelId, item = endpoint.params.messageId || endpoint.params.participantId
     const channel = await requireChannel(env, user, channelId)
+    const access = await serverAccess(env, user.id, channel.workspaceId)
+    const permissions = access.channelPermissions(channelId)
+    const require = (key: import('../shared/permissions').PermissionKey) => { if (!permissions.includes(key)) throw new HttpError(403, `Missing permission: ${key}`) }
+    if (['messages', 'threads', 'thread', 'threadFollow', 'threadFollowUpdate', 'threadCreate', 'reactionToggle', 'aiAsk', 'messageCreate'].includes(endpoint.name)) require('messages.read')
     if (endpoint.name === 'threadFollow' || endpoint.name === 'threadFollowUpdate') {
       await requireThread(env, channelId, endpoint.params.threadId!)
       const key = and(eq(tables.threadFollowers.userId, user.id), eq(tables.threadFollowers.threadId, endpoint.params.threadId!))
@@ -360,8 +400,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     }
     if (endpoint.name === 'attachmentCreate') return json(await createAttachment(env, user, channelId, request), 201)
     if (endpoint.name === 'channelUpdate') {
-      const membership = await requireMembership(env, user.id, channel.workspaceId)
-      if (membership.role !== 'owner') throw new HttpError(403, 'Only the server owner can change channels')
+      require('channels.manage')
       const input = channelUpdateSchema.parse(await readBody(request))
       const updated = await db.update(tables.channels).set(input).where(eq(tables.channels.id, channelId)).returning().get()
       await publish(env, channel.workspaceId, { type: 'refresh', channelId })
@@ -374,6 +413,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
         messages: await getMessages(env, channelId, user.id, undefined, url.searchParams.get('focus') || undefined, thread.id) })
     }
     if (endpoint.name === 'threadCreate') {
+      require('threads.create'); require('messages.send')
       if (channel.kind !== 'text') throw new HttpError(400, 'Choose a text channel first')
       const input = threadCreateSchema.parse(await readBody(request))
       const parent = await db.select().from(tables.messages).where(and(eq(tables.messages.id, input.parentMessageId), eq(tables.messages.channelId, channelId))).get()
@@ -392,6 +432,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       return json(await getMessages(env, channelId, user.id, undefined, url.searchParams.get('focus') || undefined, threadId))
     }
     if (endpoint.name === 'messageCreate') {
+      require('messages.send')
       if (channel.kind !== 'text') throw new HttpError(400, 'Choose a text channel to send messages')
       const input = messageSchema.parse(await readBody(request))
       const existing = await db.select().from(tables.messages).where(eq(tables.messages.id, input.id)).get()
@@ -404,6 +445,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
         }
       }
       const fileIds = input.attachmentIds || []
+      if (fileIds.length) require('attachments.upload')
       let inserted = false
       if (!existing) {
         if (fileIds.length) {
@@ -432,14 +474,15 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       const message = await db.select().from(tables.messages).where(and(eq(tables.messages.id, item), eq(tables.messages.channelId, channelId))).get()
       if (!message) throw new HttpError(404, 'Message not found')
       if (method === 'PATCH') {
+        require('messages.send')
         if (message.authorId !== user.id) throw new HttpError(403, 'You can only edit your own messages')
         const input = editMessageSchema.parse(await readBody(request))
         await db.update(tables.messages).set({ text: input.text, editedAt: Date.now() }).where(eq(tables.messages.id, item)).run()
       } else if (method === 'DELETE') {
-        const membership = await requireMembership(env, user.id, channel.workspaceId)
-        if (message.authorId !== user.id && membership.role !== 'owner') throw new HttpError(403, 'You cannot delete this message')
+        if (message.authorId !== user.id) require('messages.manage')
         await db.delete(tables.messages).where(eq(tables.messages.id, item)).run()
       } else if (method === 'POST') {
+        require('reactions.add')
         const input = reactionSchema.parse(await readBody(request))
         const condition = and(eq(tables.reactions.messageId, item), eq(tables.reactions.userId, user.id), eq(tables.reactions.emoji, input.emoji))
         const reaction = await db.select().from(tables.reactions).where(condition).get()
@@ -450,6 +493,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       return json({ ok: true })
     }
     if (endpoint.name === 'aiAsk') {
+      require('ai.ask'); require('messages.send')
       if (channel.kind !== 'text') throw new HttpError(400, 'Choose a text channel first')
       if (!await hub(env, '_auth').consumeRate(`ai:${user.id}`, 3)) throw new HttpError(429, 'Please wait before asking AI again')
       const text = await askAI(env, channelId, user.id), id = crypto.randomUUID()
@@ -460,6 +504,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       return json(message)
     }
     if (endpoint.name === 'huddleJoin') {
+      require('voice.connect')
       if (!await hub(env, '_auth').consumeRate(`huddle:${user.id}`, 8)) throw new HttpError(429, 'Please wait before joining again')
       const result = await hub(env, channel.workspaceId).joinHuddle(channel.id, channel.name, user)
       if (!result.ok) throw new HttpError(result.status, result.message)
@@ -482,7 +527,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       await db.delete(tables.huddles).run()
     }
     for (const key of ['realtimeToken', 'openrouterKey'] as const) if (input[key] !== undefined) await setSetting(env, key, input[key] ? await encrypt(input[key], env.APP_SECRET) : '')
-    for (const key of ['realtimeAccountId', 'realtimeAppId', 'realtimePreset', 'aiModel'] as const) await setSetting(env, key, input[key])
+    for (const key of ['realtimeAccountId', 'realtimeAppId', 'realtimePreset', 'realtimeListenerPreset', 'aiModel'] as const) await setSetting(env, key, input[key])
     return json(await integrationStatus(env))
   }
   if (endpoint?.name === 'integrationsAiTest') {
