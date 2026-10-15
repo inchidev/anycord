@@ -17,10 +17,19 @@ export const transientTables = ['sessions', 'auth_session', 'auth_verification',
 export const guardedTables = [...backupTables, 'huddles', 'huddle_participants', 'telegram_outbox', 'app_outbox', 'app_invocations'] as const
 export const tableNameSchema = z.enum(backupTables)
 export const rowSchema = z.record(z.string(), z.union([z.string(), z.number(), z.null()]))
-export const backupManifestSchema = z.object({
+const legacyBackupManifestSchema = z.object({
   format: z.literal(1), id: z.uuid(), installationId: z.string().min(1).max(128), origin: z.url(), engine: z.enum(['cloudflare', 'celld']), build: buildSchema, createdAt: z.number().int(),
   tables: z.array(z.object({ name: tableNameSchema, rows: z.number().int().nonnegative(), columns: z.array(z.string()), path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.number().int().nonnegative() })),
   objects: z.array(z.object({ id: z.uuid(), path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.number().int().positive() })),
   secrets: z.object({ path: z.literal('private/secrets.json'), sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.number().int().positive() }),
 })
 export function compareVersions(a: string, b: string) { const aa = stableVersion.parse(a).split('.').map(Number), bb = stableVersion.parse(b).split('.').map(Number); for (let i = 0; i < 3; i++) { const n = aa[i]! - bb[i]!; if (n) return n } return 0 }
+
+export { bytesDigest, encodeBackupPayload, decodeBackupPayload, authenticateBackupManifest, verifyBackupManifest } from './backup-payload'
+const payloadSchema = z.object({ path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.number().int().nonnegative(), encodedSha256: z.string().regex(/^[a-f0-9]{64}$/), encodedSize: z.number().int().positive() })
+export const cloudBackupManifestSchema = legacyBackupManifestSchema.omit({ format: true, tables: true, objects: true, secrets: true }).extend({
+  format: z.literal(2), encrypted: z.literal('AES-256-GCM'), authentication: z.string().regex(/^[a-f0-9]{64}$/),
+  tables: z.array(z.object({ name: tableNameSchema, rows: z.number().int().nonnegative(), columns: z.array(z.string()), parts: z.array(payloadSchema) })),
+  objects: z.array(payloadSchema.extend({ id: z.uuid() })), secrets: payloadSchema,
+})
+export const backupManifestSchema = z.discriminatedUnion('format', [legacyBackupManifestSchema, cloudBackupManifestSchema])

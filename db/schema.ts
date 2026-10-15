@@ -145,3 +145,8 @@ export const auditEvents = sqliteTable('audit_events', {
   actorId: text('actor_id').notNull(), action: text('action').notNull(), targetId: text('target_id').notNull(),
   detail: text('detail').notNull(), createdAt: integer('created_at').notNull(),
 }, t => [index('audit_workspace_time').on(t.workspaceId, t.createdAt)])
+
+export const installationBackups = sqliteTable('installation_backups', {
+  id: text('id').primaryKey(), jobId: text('job_id').notNull(), createdAt: integer('created_at').notNull(),
+  manifestHash: text('manifest_hash').notNull(), manifestKey: text('manifest_key').notNull(), destination: text('destination').notNull(),
+})

@@ -1,0 +1,68 @@
+name: Apply installation update
+run-name: Update Anycord ${{ inputs.version }} · job ${{ inputs.job_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Approved installation update job UUID
+        required: true
+        type: string
+      installation_id:
+        description: Logical installation identity
+        required: true
+        type: string
+      origin:
+        description: Must match this repository's installation.json
+        required: true
+        type: string
+      version:
+        description: Approved immutable release version
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: installation-update-${{ inputs.installation_id }}
+  cancel-in-progress: false
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ANYCORD_MIGRATION_TOKEN: ${{ secrets.MIGRATION_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      UPDATE_JOB_ID: ${{ inputs.job_id }}
+      UPDATE_INSTALLATION_ID: ${{ inputs.installation_id }}
+      UPDATE_ORIGIN: ${{ inputs.origin }}
+      UPDATE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22
+          cache: npm
+      - name: Validate the installation and approved checkpoint
+        run: node scripts/prepare-cloud-update.mjs
+      - run: npm ci
+      - name: Download the installed release's operator
+        run: |
+          set -euo pipefail
+          source_version="$(node -p "require('./output/cloud-update/source.json').version")"
+          gh release view "v$source_version" --repo inchidev/anycord --json isImmutable,isDraft,isPrerelease > output/cloud-update/release.json
+          node -e "const r=require('./output/cloud-update/release.json'); if(!r.isImmutable||r.isDraft||r.isPrerelease)throw Error('Source release is not immutable')"
+          gh release download "v$source_version" --repo inchidev/anycord --dir output/cloud-update/package --pattern "anycord-$source_version-cloudflare.tar.gz" --pattern anycord-release.json --pattern SHA256SUMS
+          cd output/cloud-update/package
+          sha256sum --check --ignore-missing SHA256SUMS
+          mkdir extracted
+          tar -xzf "anycord-$source_version-cloudflare.tar.gz" -C extracted
+          node -e "const assert=require('node:assert/strict'); const s=require('../source.json'),m=require('./anycord-release.json'); for(const k of ['version','commit','apiVersion','schema'])assert.equal(s[k],m[k]);assert.deepEqual(require('./extracted/version.json'),s)"
+      - name: Apply the approved update and verify recovery data
+        run: node output/cloud-update/package/extracted/operations/cli.mjs resume output/cloud-update/operator.json "$UPDATE_JOB_ID"
+      - name: Remove ephemeral recovery copies and claims
+        if: always()
+        run: rm -rf output/cloud-update

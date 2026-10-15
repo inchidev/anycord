@@ -8,11 +8,15 @@ export function randomToken(bytes = 24) {
 export async function requireServerOwner(env: Env, userId: string, workspaceId: string) {
   if ((await requireMembership(env, userId, workspaceId)).role !== 'owner') throw new HttpError(403, 'Only the server owner can manage invitations and members')
 }
-export async function generateRecoveryKeys(env: Env, userId: string, password: string) {
+export async function confirmPassword(env: Env, userId: string, password: string) {
   const account = await env.DB.prepare("SELECT password FROM auth_account WHERE user_id = ? AND provider_id = 'credential'").bind(userId).first<{ password: string }>()
   const valid = account?.password && ( /^[a-f0-9]{32}:[a-f0-9]{64}$/.test(account.password)
     ? await legacyVerify(password, account.password) : await verifyPassword({ password, hash: account.password }))
   if (!valid || !account) throw new HttpError(401, 'Current password is incorrect')
+  return account
+}
+export async function generateRecoveryKeys(env: Env, userId: string, password: string) {
+  const account = await confirmPassword(env, userId, password)
   const keys = Array.from({ length: 8 }, () => randomToken(16).match(/.{4}/g)!.join('-'))
   const hashes = await Promise.all(keys.map(key => digest(key.replaceAll('-', ''))))
   // Guard rotation against a concurrent password reset after password verification.

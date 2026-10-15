@@ -222,3 +222,20 @@ export async function restoreObject(env: Env, id: string, request: Request) {
   await put(env, await loadConfig(env, row.storageId), row.objectKey, bytes)
   return { ok: true as const }
 }
+
+export async function assertSeparateBackupStorage(env: Env, config: { endpoint: string; bucket: string; accessKeyId: string; secretAccessKey: string }, probeKey: string) {
+  const rows = await database(env).select().from(storageConfigs).all()
+  if (env.STORAGE_BUCKET === config.bucket && env.STORAGE_ENDPOINT && new URL(env.STORAGE_ENDPOINT).origin === new URL(config.endpoint).origin) throw new HttpError(400, 'Backups must use a different bucket from attachment storage')
+  if (env.STORAGE_ACCESS_KEY_ID === config.accessKeyId && env.STORAGE_SECRET_ACCESS_KEY === config.secretAccessKey) throw new HttpError(400, 'Use separate credentials for the backup bucket')
+  if (env.FILES) { const found = await env.FILES.head(probeKey); if (found) throw new HttpError(400, 'Backups must use a different bucket from attachments') }
+  for (const row of rows) {
+    const fileConfig = await loadConfig(env, row.id)
+    if (fileConfig.driver !== 's3') continue
+    if (new URL(fileConfig.endpoint).origin === new URL(config.endpoint).origin && fileConfig.bucket === config.bucket) throw new HttpError(400, 'Backups must use a different bucket from attachments, including historical file stores')
+    const response = await s3Request(fileConfig, probeKey, 'GET')
+    await response.body?.cancel()
+    if (response.ok) throw new HttpError(400, 'The backup endpoint aliases an attachment bucket; choose a separate bucket')
+    if (response.status !== 404) throw new HttpError(502, 'Could not verify that backup storage is separate from existing attachment storage')
+    if (fileConfig.accessKeyId === config.accessKeyId && fileConfig.secretAccessKey === config.secretAccessKey) throw new HttpError(400, 'Use separate credentials for the backup bucket')
+  }
+}

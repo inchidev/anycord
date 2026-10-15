@@ -1,126 +1,102 @@
 # Installation backups and updates
 
-Backups and updates belong to the **installation**, including all communities. An ordinary community owner cannot operate on the installation. Installation Settings → Backups & updates shows the current version, runner status, policy, operations, verified checkpoints and the latest compatible immutable release. A community is not an independently updatable deployment.
+Installation Settings → Backups & updates manages every community, account and committed private file in the installation. Only the installation owner can configure storage, request operations or recover keys. A community owner does not control the installation.
 
-This feature needs the release that introduces migration `0011_fancy_vanisher`. Earlier installations use the existing manual published-package installation procedure once to bootstrap it. Subsequent compatible releases can be selected in Settings. Publication, merging and runner startup never automatically update installations.
+Backups run inside the installation and upload directly to a **separate private S3-compatible bucket**. No always-on external runner is required. Updates first verify an encrypted S3 recovery point, then start a temporary cloud deployment job. Owners explicitly choose a compatible immutable GitHub Release; merging or publishing does not update installations automatically.
 
-## Trust and operation boundary
+This mode requires migration `0012_separate_s3_backups`. Install 0.6.0 once using the existing published-package promotion procedure. The previous filesystem operator remains available for advanced/manual recovery and older installations.
 
-Run one operator process per installation on a trusted machine. It holds the migration token and the deployment capabilities for that installation. The browser can request a backup/update and inspect sanitized status; it never receives Cloudflare deployment tokens, backup encryption keys, runner claims or raw account tables. The migration token grants full operator backup/restore/migration access and must be protected like the installation encryption key. Use HTTPS, or loopback for local testing. Cross-origin operator requests and redirects are refused.
+## Configure backup storage
 
-The runner copies data to an operator-controlled filesystem outside the deployment. Mount backup storage outside the immediate failure boundary, for example an encrypted off-host volume. All newly created backup directories are private (0700), all payloads and key files are 0600. **The portable format is not an encrypted archive.** Account hashes, provider credentials and signing/encryption keys are sensitive even though settings are encrypted in the database. Restrict and encrypt the backup volume; do not put it in Git, a public bucket or a shared download directory. Keep `private/secrets.json` protected separately when transferring/storing copies. It is required to verify and recover encrypted settings.
+In Installation Settings → Backups & updates, enter a dedicated S3 endpoint, bucket, region and access/secret key pair. Use credentials scoped to this backup bucket. The bucket and credentials must be independent of the attachment store, including historical stores still holding committed files. Configuration verifies write/read/delete access and rejects aliases of the physical attachment bucket. Cloudflare requires HTTPS; local celld also accepts HTTP endpoints. Providers must support path-style S3 requests.
 
-No Cloudflare account token or Docker access is stored inside the application Worker. The runner uses the same operations protocol on native Cloudflare and celld. Cloudflare account actions are performed by the configured operator's deployment credentials. celld activation uses the operator's existing Docker Compose deployment and state mount.
+For R2, create a separate private bucket, an **Object Read & Write** token scoped to it, endpoint `https://<account-id>.r2.cloudflarestorage.com` and region `auto`. Keep public access disabled. No additional application R2 binding is needed: the backup engine uses the configured S3 endpoint. Changing backup storage does not move attachments.
 
-## Runner setup
+Save the displayed **64-character recovery key** in an external password manager. It encrypts backup payloads and authenticates their inventory. Losing the installation and this key makes encrypted recovery impossible. The owner can export it again after entering their current account password. Storage changes preserve the recovery key; keep old bucket access available for older recovery points. Ordinary status responses never expose storage secrets, the key or raw account records.
 
-Extract a verified published package. Its `operations/` directory contains a Node.js CLI with bundled contracts; the portable backup/restore code needs Node 22 and no application rebuild. For Cloudflare activation install the release's pinned Wrangler on the operator machine. For celld activation provide Docker/Compose and the existing deployment's configuration. Run the runner under your usual service supervisor; after an interrupted update/restore use explicit recovery rather than silently restarting the operation.
+Use Create backup for an immediate copy, or set the interval in hours; 0 disables scheduling. The existing installation cron starts one overdue backup when idle. Durable alarms checkpoint progress, retry transient storage failures and resume after a runtime restart. A cancelled backup cannot become a verified recovery point. Five failed attempts stop the operation and release its write pause when deployment has not started.
 
-Create a private configuration file with **absolute paths**:
+Choose at least two retained recovery points. Retention removes only catalogued, verified copies belonging to this installation, from their recorded destinations. Interrupted-update checkpoints remain pinned in addition to recent copies. Foreign objects and partial uploads are left untouched. Cancelled/failed partial uploads can be inspected and removed separately; provider lifecycle/version retention is independent of this policy.
 
-```json
-{
-  "origin": "https://chat.example.com",
-  "engine": "cloudflare",
-  "migrationTokenFile": "/private/anycord/migration-token",
-  "backupDirectory": "/mnt/encrypted-backups/anycord",
-  "releaseDirectory": "/private/anycord/releases",
-  "cloudflare": {
-    "installationFile": "/private/anycord/installation.json",
-    "wrangler": "/private/anycord/tooling/node_modules/.bin/wrangler",
-    "tokenEnv": "CLOUDFLARE_API_TOKEN"
-  }
-}
-```
-
-The installation JSON is the existing account/Worker/D1/R2/origin configuration described in `RELEASES.md`. The adapter checks the origin and existing DB/bucket, preserves runtime variables and resource bindings, deploys the verified package, then compares bindings again. It refuses unsupported existing binding types rather than dropping them. Store the Cloudflare token in the supervisor's environment or secret manager; never in CLI arguments. `migrationTokenEnv` (default `ANYCORD_MIGRATION_TOKEN`) can replace `migrationTokenFile`.
-
-```sh
-node operations/cli.mjs run /private/anycord/operations.json
-```
-
-`run` heartbeats and polls for owner-requested jobs. `once` processes at most one queued job. `backup` queues/processes one explicit backup. One local lock and a stable runner identity live under `releaseDirectory`. A database unique index serializes active installation jobs. Claims are fenced and private; a second poller cannot claim a running job. Do not copy a runner identity to another live host or run two independent deployment controllers for one installation.
-
-### celld with Docker Compose
-
-Use a Compose service with `image: ${ANYCORD_IMAGE:?Choose a published Anycord image}`, the same project/service names, the same `/app/.celld` persistent volume/bind and the same AUTH_BASE_URL and S3/RustFS environment. Preserve the existing named volume; do not create a replacement project or use `down --volumes`. The packaged Dockerfile builds an image from prebuilt application assets, without rebuilding application source. The runner assigns an explicit version-and-commit image tag.
-
-```json
-{
-  "origin": "https://chat.example.com",
-  "engine": "celld",
-  "migrationTokenFile": "/private/anycord/migration-token",
-  "backupDirectory": "/mnt/encrypted-backups/anycord",
-  "releaseDirectory": "/private/anycord/releases",
-  "celld": {
-    "composeFile": "/srv/anycord/compose.release.yml",
-    "envFile": "/private/anycord/storage.env",
-    "project": "celld-local-chat",
-    "service": "chat",
-    "context": "colima"
-  }
-}
-```
-
-Omit `context` when using the default Docker context. The migration token must be available to the operator in a private file/environment. celld's start script now preserves `.celld/migration-token` across restarts, alongside `.celld/app-secret`. Before any container replacement the adapter inspects the running container and resolved Compose configuration, verifies the persistent state mount and storage/auth environment, and refuses changes. It builds the prebuilt release image, recreates only the configured service, and verifies the original mount again. Back up the externally hosted S3/RustFS service operationally as well; portable backups contain committed attachment bytes but not unrelated bucket objects or provider configuration outside Anycord.
+The privileged operator protocol also accepts `PUT /api/_operations/backup-storage` and `PUT /api/_operations/cloud-updates` with the same validated configuration bodies and `X-Migration-Token`. Use a protected input file or secret manager for provisioning. These endpoints grant the same capabilities as the owner UI and require the installation's existing migration token; cross-origin requests are refused.
 
 ## Backup format and consistency
 
-A backup directory is named by UUID. `manifest.json` records format 1, logical installation identity, engine, origin, exact app/API/schema/source identity, timestamp, table columns/counts and SHA-256/size inventories. `tables/*.jsonl` contains application/auth records in bounded pages. `objects/<attachment-id>` contains committed private attachments, including files in older configured stores. `private/secrets.json` contains APP_SECRET and the operational/setup keys needed for recovery. Every payload is checked before a checkpoint is recorded.
+S3 copies live under `anycord-backups/<installation-id>/<backup-id>/`. Format 2 `manifest.json` records the exact application/API/schema/source identity, table columns/counts, bounded table parts, committed attachments and encoded/plaintext SHA-256/size inventories. Payloads use AES-256-GCM with independent random nonces. An HMAC authenticates the manifest's metadata and file mappings. The manifest exposes inventory metadata, not record or file contents. Every uploaded payload is read back, hashed and decrypted before it is accepted; the authenticated manifest is written last and verified before recording the recovery point.
 
-A maintenance flag stops new chat/API work. SQLite triggers reject writes to snapshot-owned tables even from requests/background work that already started. Reads are paged by rowid while the snapshot stays frozen; files are immutable committed uploads. Unfinished uploads, sessions, OAuth challenges, live tickets, active calls and pending notification deliveries are excluded. In-flight actions may fail/retry and callers retain unsent drafts; choose a quiet maintenance window. The freeze remains until all payloads, counts, keys and checksums are verified. This avoids claiming a transactionally consistent copy from a sequence of uncoordinated reads.
+The encrypted payloads include account/password records, communities, messages, roles, channel overrides, app profiles/grants, webhook hashes, message receipts, committed attachment bytes and the installation keys required to recover encrypted settings. Settings secrets remain encrypted by the installation key inside the encrypted backup. Recovery files are sensitive even when encrypted: keep the bucket private and the recovery key separate.
 
-The first version intentionally pauses writes for the full backup/update verification interval. A large installation therefore needs a planned window. Duration, disk use and recovery point are recorded by the operator; a copy restores the state at its freeze, not subsequent changes. Provision sufficient backup disk capacity and monitor the supervised runner.
+A maintenance fence pauses new chat/API writes. SQLite triggers also reject writes from requests already in flight while snapshot-owned tables are copied. Data is paged by rowid and committed files are immutable. Sessions, OAuth challenges, live tickets, calls, command invocations, pending notification deliveries and uncommitted uploads are excluded. Users retain unsent drafts, but in-flight actions may need retrying. Choose a quiet window: writes stay paused for the **entire** copy and verification interval, and for deployment when updating.
 
-Budget retained table/file/key bytes on the operator volume plus transfer and object-read costs at the source provider. Each backup copies every committed attachment; there is no incremental deduplication. `retainBackups` limits verified local recovery points, with interrupted-update checkpoints additionally pinned. Neither retention nor the schedule controls a provider’s own object versions, database recovery window or off-site volume bill.
+This is a full copy, without incremental deduplication. Budget stored table/file/key bytes, S3 write/read requests and attachment-provider transfer costs for every recovery point. Current limits are 25 records and 2 MiB per table page, the application's 8 MiB attachment limit, and an 8 MiB manifest. Exceeding a limit fails verification; it never reports a partial copy as recoverable. A backup restores its frozen state, not later writes, browser drafts, DNS or unrelated infrastructure data.
 
-Owner policy sets backup interval in hours (0 disables scheduling) and a minimum retention count of 2. While connected, the runner queues a due backup only when no other job/maintenance operation is active. After reconnect it runs one overdue backup, not a burst of missed intervals. Retention removes only complete, checksum-verified directories belonging to that installation. Partial/corrupt/foreign directories and checkpoints needed by interrupted updates are preserved for operator inspection. Retention is not an off-site replication service.
+## Configure the cloud update executor
 
-```sh
-node operations/cli.mjs backup /private/anycord/operations.json
-node operations/cli.mjs verify /private/anycord/operations.json /mnt/encrypted-backups/anycord/<backup-id>
+The supplied [installation-update.yml](https://github.com/inchidev/anycord/blob/main/.github/workflows/installation-update.yml) uses GitHub-hosted Actions. Both release archives include its template and preparation script under `cloud-executor/`. Copy them to `.github/workflows/installation-update.yml` and `scripts/prepare-cloud-update.mjs` in the deployment repository's default `main` branch. Keep the application's pinned Wrangler tooling in that repository. Configure its `installation.json` for the existing Worker, D1, attachment R2 bucket and HTTPS origin, and its protected `production` environment with:
+
+- `CLOUDFLARE_API_TOKEN`: deployment access for the intended installation.
+- `MIGRATION_TOKEN`: the installation's existing migration/operator token.
+
+In Settings, select `owner/repository`, workflow filename and a fine-grained GitHub token scoped to that repository with **Actions read/write**. The application verifies that the workflow exists and is active. Keep main protected: workflow code can access the environment's deployment credentials. Those credentials remain in GitHub; the application stores only the encrypted dispatch token. An expired/revoked Actions token must be replaced before requesting another update.
+
+The supplied executor targets Cloudflare. A remote celld installation needs its own cloud workflow with access to the existing host/Docker context, persistent state mount and deployment secrets; copying the Cloudflare example alone will not deploy celld. Direct S3 backups work on both runtimes. A temporary Actions job is still called a runner by GitHub, but no permanently connected operator process is needed.
+
+## Apply an update
+
+The UI checks stable immutable releases from `inchidev/anycord`. It verifies engine, API and schema upgrade compatibility. A changed release commit after owner approval is refused. Same-schema releases are supported by default; a schema change requires an explicit compatible declaration in `release-upgrade.json`, embedded in the published manifest. API v1 alone is insufficient.
+
+An update freezes the installation and creates/verifies a new encrypted S3 checkpoint before dispatching the cloud workflow. The workflow checks the requested origin against its checked-in installation configuration and verifies the logical installation ID, target version and checkpoint. It downloads the installed version's immutable operator package, checks its checksums and identity, then claims that approved operation.
+
+The temporary executor downloads and verifies the recovery point, fetches the exact approved release, checks artifact hashes and archive paths, and activates the prebuilt package. It preserves the existing resources and secrets, applies authenticated `/api/_migrate` migrations and verifies the exact client/Worker version, commit and schema. Before reopening chat it compares all prior records, private files, installation identity and keys with the checkpoint. Existing sessions survive an ordinary compatible update. No `wrangler d1 migrations apply` is used. Ephemeral recovery copies and claims are removed when the job exits; the independent S3 checkpoint remains.
+
+A definitive dispatch rejection or a cloud workflow failure **before any deployment claim** safely reopens chat. Fix the executor and request a fresh update/checkpoint. If dispatch acceptance is uncertain or deployment was claimed/interrupted, the installation stays paused. Inspect the workflow, stop any previous executor and use **Retry cloud update** to reuse the pinned checkpoint. Retry is refused while an update is running; stale workflow runs cannot fail a newly dispatched attempt. A checkpoint whose snapshot is no longer frozen cannot be claimed for deployment.
+
+The UI observes failed Actions runs while Settings/status is being checked. It does not assume that an unresponsive workflow deployed successfully. GitHub environment approvals and queued capacity can delay a job; the write pause remains until the operation is explicitly resolved.
+
+## Download and restore
+
+Use the published package's standalone `operations/` CLI with Node 22. Download a copy directly from S3 even when the source installation is unavailable. Create a private configuration file with absolute paths and the **source** installation ID/bucket credentials:
+
+```json
+{
+  "origin": "https://empty-target.example.com",
+  "engine": "cloudflare",
+  "migrationTokenFile": "/private/target/migration-token",
+  "backupDirectory": "/private/recovery",
+  "releaseDirectory": "/private/operator",
+  "s3": {
+    "endpoint": "https://<account-id>.r2.cloudflarestorage.com",
+    "bucket": "anycord-backups",
+    "region": "auto",
+    "accessKeyId": "<backup-bucket-key>",
+    "secretAccessKey": "<backup-bucket-secret>",
+    "installationId": "<source-installation-id>"
+  }
+}
 ```
 
-## Applying an update
-
-Settings offers only an explicit published immutable stable version. The runner re-fetches its metadata and manifest from `inchidev/anycord`, verifies engine/API/schema compatibility, artifact SHA-256/size, safe archive paths and exact packaged client/Worker identity. A changed commit after owner approval is refused. Download/preflight failures happen before deployment. Releases with no upgrade declaration are supported only on the same schema. A different schema requires an explicit `upgrade.fromSchemas` declaration with `migrations: "backward-compatible"`; API v1 alone is insufficient. Release authors maintain `release-upgrade.json`, which is embedded in the manifest.
-
-The runner freezes the installation, creates/verifies a complete checkpoint and pins it before activation. It deploys the exact prebuilt package, applies authenticated application migrations, and verifies health plus exact client/Worker version/commit/schema. Privileged migration batches temporarily bypass the write guard **inside the same SQLite transaction**, never exposing an unguarded interval to another writer. Before reopening chat it compares every prior application record and private object with the recovery point and proves that the installation identity and all saved keys remain unchanged. Existing sessions remain usable for an ordinary compatible update.
-
-No `wrangler d1 migrations apply` is used. Backups are mandatory; an update cannot progress to deployment without a verified checkpoint. Jobs survive process restarts. A failed update stays in maintenance with its checkpoint and diagnostics; it is not advertised as successfully updated.
-
-## Restore drill and recovery
-
-Provision a **separate empty installation** with the same supported schema/API and fresh Worker/DO/DB/file resources, or an independently configured empty celld process/state/store. Engine conversion is supported by the shared logical records/file format; provision the target storage explicitly. The restore protocol checks the target installation identity and refuses existing accounts, custom communities/channels/messages or attachments. It does not overwrite a running installation.
+Supply `ANYCORD_BACKUP_KEY` from your secret manager, or add `recoveryKey` to the protected S3 config. Keep local key files separate from encrypted copies during transfer. Download writes private directories (0700) and files (0600), bounds network reads, verifies the authenticated inventory and ciphertext/plaintext hashes, and refuses unsafe paths/symlinks.
 
 ```sh
-node operations/cli.mjs restore /private/empty-target/operations.json /mnt/encrypted-backups/anycord/<backup-id>
+node operations/cli.mjs download /private/target/operations.json <backup-id>
+node operations/cli.mjs verify /private/target/operations.json /private/recovery/<backup-id>
+node operations/cli.mjs restore /private/target/operations.json /private/recovery/<backup-id>
 ```
 
-All checksums, record counts, columns, attachment inventories and the source encryption key are verified **before** any target mutation. The target keeps its own fresh encryption/signing and operational keys; imported encrypted settings are re-encrypted for that key. Attachments are rebound to the destination store under a unique installation/restore prefix; source objects and unrelated destination keys are never overwritten. Messages are loaded before threads with temporary null links, then original reply/thread relationships are reattached. Every imported record and object is read back, transformed encrypted settings are verified by plaintext, and foreign keys checked before maintenance ends. A mismatch leaves the destination frozen for explicit recovery.
+Provision a **separate empty installation** with the matching schema/API and fresh Worker/DO/DB/file resources, or fresh celld state/store. The restore protocol refuses an existing populated destination. Integrity, key, columns, counts and attachment inventories are verified before any target mutation. The target retains its own fresh encryption/signing/operational keys; imported settings and app signing secrets are re-encrypted for them. Attachments are rebound under a unique destination prefix; source bytes and unrelated destination objects are never overwritten.
 
-Accounts, IDs, password hashes, memberships, invitations, bans, recovery keys, threads/reactions and files survive. Roles, channel overrides, app profiles, channel grants, webhook hashes, audit history and message idempotency receipts also survive. Old sessions/OAuth tokens, live tickets, calls, command invocations and pending deliveries do not. App signing secrets are re-encrypted for the destination key and restored apps start disabled; review each app and its channel grants before enabling it. Telegram login/registration/notifications are disabled initially; saved credentials remain available for owner review. AI/huddle/bot provider calls are blocked by a restore marker until the installation owner explicitly enables external integrations in Settings. Review the new domain, bot callback/webhook and auth policy before enabling Telegram again. The owner signs in with their original password/recovery mechanism and generates fresh recovery keys as needed.
+Accounts, IDs, password hashes, memberships, invitations, bans, recovery keys, threads/reactions, files, roles, grants and audit history survive. Sessions are revoked. Apps start disabled; Telegram login/registration/notifications and external integrations require owner review before enabling. Backup storage and cloud executor credentials are **not activated on the destination**: explicitly reconnect them. Every imported record/file is read back and foreign keys checked before maintenance ends. A mismatch leaves the destination paused for explicit recovery.
 
-Verify sign-in, community access, threads/reactions and private file download on the destination before changing any public routing. Keep the original installation and checkpoint available until acceptance. Record the measured restore time and backup timestamp. The portable snapshot does not include browser drafts, uncommitted uploads, provider-side call state, DNS or unrelated infrastructure data.
+Verify sign-in, communities, threads/reactions and private download before changing routing. Keep the original installation and checkpoint available until acceptance. A code rollback is not a database restore: incompatible schema changes require the matching backup/code in a separate destination.
 
-### Interrupted jobs
+## Advanced manual operator
 
-Stop the old runner/deployment process first. Inspect its private `last-error.log` and the installation job/health. A stale `runner.lock` is removed manually only after verifying that its PID/process is gone. Keep the same runner identity and recovery directory.
+Existing format 1 filesystem backups remain readable. They are **not encrypted archives**: restrict/encrypt their volume and protect `private/secrets.json` separately. A trusted Node operator with the installation migration token can still run `run`, `once`, `backup`, `resume` and `rollback`. Keep its backup directory outside deployment state and releases. Configure Cloudflare activation with the existing installation file, pinned Wrangler path and a token environment variable, or celld activation with the existing Compose file/project/service/context and persistent volume. Never run two independent deployment controllers for one installation.
 
-```sh
-node operations/cli.mjs resume /private/anycord/operations.json <update-job-id>
-node operations/cli.mjs rollback /private/anycord/operations.json <update-job-id>
-ANYCORD_RESTORE_RESUME_ID=<restore-job-id> node operations/cli.mjs restore /private/empty-target/operations.json /mnt/encrypted-backups/anycord/<backup-id>
-```
-
-An update resumed after successful deployment proves the target identity, migrations, original data/files/keys and checkpoint before completing; otherwise it reuses the verified source checkpoint. Restore resumes only its own still-fenced partial destination and resets that imported data before replaying the same verified backup. Failure never unlocks a partial restore/update. A backup can be cancelled safely from Settings: fencing prevents the old runner from recording it as verified afterward.
-
-`rollback` applies only to an interrupted update and its original verified checkpoint. It refuses a changed schema/API before activation, selects the checkpoint’s exact immutable source release, preserves the frozen database/files/keys and verifies their original contents before reopening chat. It changes code, never replays database records. If the new code/schema changed existing records, verification remains failed and maintenance stays enabled. For an incompatible schema change, restore the matching backup into a separate empty destination and promote the matching code; a code rollback is not a database rollback. Never move a published tag or treat a partially published release as stable.
+For an interrupted cloud update, a manual executor uses `runnerId` equal to the update job UUID and `backupMode: "installation-s3"`; it downloads the pinned S3 recovery point before deployment. Stop the prior cloud job first. Resume/rollback requires the original verified checkpoint and maintenance fence. Remove a stale local lock only after confirming its process is gone. Rollback verifies the original schema/API/data/files/keys and refuses a schema rollback; it never replays records over an active installation.
 
 ## Validation
 
-`npm run test:operations` uses real workerd/D1/DO/R2 and the actual celld API handler with an intercepted S3-compatible provider. It exercises installation-owner authorization, operation serialization/idempotency, write-trigger fencing, complete backup/key/file verification, corruption refusal before mutation and after import, interrupted restore/resume, password/membership/thread/file recovery, revoked sessions, disabled restored integrations, refused non-empty destinations, failed deployment/resume, runtime replacement, migrations and exact prior record/file/key preservation. It also checks retention of pinned/foreign/corrupt copies, compatible code rollback and refusal of schema rollback. Provider/deployment adapter tests additionally cover archive integrity/paths and wrong resource/state targets. Browser checks cover owner Settings controls and progress at mobile/desktop sizes. These checks do not claim a live Cloudflare rollout or physical mobile acceptance; promotion remains a separate explicit operation.
+`npm run verify` includes native S3 tests on real workerd/D1/SQLite Durable Objects and both API engine handlers, plus the existing manual recovery suite. Tests cover separate-bucket enforcement, owner/password checks, encrypted/authenticated payloads, transient upload failures, restart/resume, cancellation/write fencing, corrupt inventory/wrong-key refusal before target mutation, fresh restore, retained/pinned checkpoints and cloud dispatch after verification. Provider and release calls in these local tests are doubles; runtime replacement and stored records/files are real.
 
-`ANYCORD_TEST_DOCKER_CONTEXT=colima npm run test:operations:docker` (omit the context override for default Docker) additionally uses a unique disposable Compose project, independent source/target state volumes and a real isolated RustFS service. It performs a portable backup/restore and actual prebuilt celld container replacement, then verifies old login sessions, records, private bytes and two-client realtime/writes. Only this test’s containers/volumes/images are removed afterward. Ports 19980–19982 must be free. Version fixtures are local; this does not publish a release.
-
-Measured local drill on 2026-10-15: 176 ms backup and 385 ms restore for two accounts, two communities and one 12-byte private attachment, using Docker/Colima and real celld/RustFS. These tiny-fixture timings exclude provisioning/image builds and do not predict a larger installation’s outage or restore time. Workerd interruption tests exercise threads/reactions and provider-key re-encryption as well. The final acceptance of two actual published releases on live Cloudflare remains a separate release/promotion check.
+`npm run test:telegram-launch` exercises the built owner settings at 390/1280px: storage and executor configuration, key delivery, policy, native backup/progress/cancellation and update dispatch without an operator heartbeat. `ANYCORD_TEST_DOCKER_CONTEXT=colima npm run test:operations:docker` additionally runs real celld alarms, separate RustFS services with independent credentials, encrypted offline download/restore and actual Compose replacement. It uses only disposable test resources; ports 19980–19983 must be free. Live release promotion and a real GitHub-dispatched owner update are separate acceptance steps.

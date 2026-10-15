@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.6.0 — 2026-10-15
+
+- Back up directly from the installation to an independently configured private S3-compatible bucket, without an always-on operator. Persist bounded progress in SQLite Durable Objects and resume through alarms after a restart.
+- Encrypt backup records, files and recovery secrets with AES-256-GCM; authenticate the inventory and verify every uploaded payload by readback. Deliver a separate recovery key, with password-protected export. Keep verified recent and interrupted-update checkpoints in S3.
+- Update from Installation Settings through a temporary GitHub Actions executor after verifying a fresh S3 checkpoint. Keep deployment credentials in the protected deployment repository, verify exact immutable packages and prior records/files/keys, and fence interrupted deployments for explicit retry.
+- Retry production verification until the deployed Worker, database schema and public client converge, including idempotent migrations during propagation.
+- Include independent S3 download/decryption in the standalone recovery CLI. Fresh restores require reconnecting backup storage and the executor. Retain compatibility with existing manual filesystem copies.
+
+### Upgrade
+
+API v1 is unchanged. Migration `0012_separate_s3_backups` adds the recovery-point catalog. Install this release once with the published-package promotion procedure, then configure a separate backup bucket/recovery key and a repository-scoped Actions token in Settings. The supplied cloud workflow targets Cloudflare; a remote celld host needs its own executor. Writes pause for the full snapshot and update verification interval.
+
+### Validation and limits
+
+Native backup/restore and cloud-dispatch behavior are checked on both real workerd engine handlers, including retries, runtime restarts, cancellation, key/inventory corruption, retention and interrupted cloud jobs. Built-client settings are checked at mobile/desktop sizes. A disposable real celld/two-RustFS drill verifies independent keys, alarms, encrypted offline download/restore and Compose replacement. Local provider/release doubles do not establish a live GitHub-dispatched production update.
+
 ## 0.5.0 — 2026-10-15
 
 - Add custom server roles, `@everyone`, multiple role assignments, hierarchy, per-channel role/member allow/deny rules and audit history. Apply permissions to discovery, messages, search, private files, realtime, notifications, AI and voice admission (#24).

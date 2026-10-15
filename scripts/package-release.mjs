@@ -22,6 +22,8 @@ try {
       ['docs/releases.md', 'RELEASES.md'], ['CHANGELOG.md', 'CHANGELOG.md'],
       ['docs/operations.md', 'OPERATIONS.md'], ['operations', 'operations'],
       ['runtime/operations-contracts.mjs', 'operations/contracts.mjs'],
+      ['.github/workflows/installation-update.yml', 'cloud-executor/installation-update.yml'],
+      ['scripts/prepare-cloud-update.mjs', 'cloud-executor/prepare-cloud-update.mjs'],
     ]) await cp(from, join(dir, to), { recursive: true })
     const config = JSON.parse(await readFile(engine === 'cloudflare' ? 'wrangler.cloudflare.jsonc' : 'wrangler.jsonc', 'utf8'))
     config.main = 'worker.js'; config.no_bundle = true

@@ -1,3 +1,6 @@
+import { backupConfig, backupRequest, boundedBackupBytes, saveBackupStorage } from './backup-storage'
+import { cloudUpdateConfig, refreshCloudUpdate, saveCloudUpdates } from './cloud-updates'
+import { cloudRecovery } from './native-backups'
 import { z } from 'zod'
 import { backupTables, transientTables, tableNameSchema, rowSchema, backupPolicySchema, jobRequestSchema, jobResultSchema, compareVersions, buildSchema } from '../shared/operations'
 import { HttpError, readBody, equalSecret, digest, encrypt, decrypt } from './security'
@@ -20,6 +23,7 @@ function publicJob(job: Job) {
   return { id: job.id, kind: job.kind, status: job.status, phase: job.phase, createdAt: job.created_at, updatedAt: job.updated_at, targetVersion: job.target_version, targetCommit: job.target_commit, targetSchema: job.target_schema, targetApiVersion: job.target_api_version, checkpoint: job.checkpoint, result: job.result ? jobResultSchema.parse(JSON.parse(job.result)) : null, error: job.error }
 }
 export async function operationsStatus(env: Env, engine: Engine) {
+  await refreshCloudUpdate(env)
   const state = await operationState(env), jobs = await env.DB.prepare('SELECT * FROM installation_jobs ORDER BY created_at DESC LIMIT 30').all<Job>()
   return { installationId: state.installation_id, build, engine, runnerSeen: state.runner_seen, maintenance: !!state.maintenance_job, outboundDisabled: !!state.outbound_disabled, policy: { backupHours: state.backup_hours, retainBackups: state.retain_backups }, jobs: jobs.results.map(publicJob) }
 }
@@ -31,12 +35,17 @@ export async function queueOperation(env: Env, engine: Engine, actor: string, ra
     return publicJob(existing)
   }
   if (state.maintenance_job) throw new HttpError(409, 'Finish or recover the maintenance operation first')
-  if (actor !== 'operator' && (!state.runner_seen || state.runner_seen < Date.now() - 180_000)) throw new HttpError(409, 'Connect the installation operations runner first')
+  const native = actor !== 'operator' && !!(await backupConfig(env))?.verified && (input.kind === 'backup' || !!(await cloudUpdateConfig(env))?.verified)
+  if (!native && actor !== 'operator' && (!state.runner_seen || state.runner_seen < Date.now() - 180_000)) throw new HttpError(409, input.kind === 'backup' ? 'Configure separate S3 backup storage first' : 'Configure S3 backups and a cloud update executor first')
   const target = input.kind === 'update' ? await publishedRelease(engine, input.version) : null
   if (target && (!target.compatible || compareVersions(target.version, build.version) <= 0)) throw new HttpError(409, 'Choose a newer compatible immutable release')
   const now = Date.now()
-  try { await env.DB.prepare("INSERT INTO installation_jobs (id,kind,status,phase,requested_by,created_at,updated_at,target_version,target_commit,target_schema,target_api_version) VALUES (?,?,'queued','queued',?,?,?,?,?,?,?)").bind(input.id, input.kind, actor, now, now, target?.version || null, target?.commit || null, target?.schema || null, target?.apiVersion || null).run() }
+  try { await env.DB.prepare("INSERT INTO installation_jobs (id,kind,status,phase,requested_by,created_at,updated_at,target_version,target_commit,target_schema,target_api_version,runner_id) VALUES (?,?,'queued','queued',?,?,?,?,?,?,?,?)").bind(input.id, input.kind, actor, now, now, target?.version || null, target?.commit || null, target?.schema || null, target?.apiVersion || null, native ? 'native-s3-queued' : null).run() }
   catch { throw new HttpError(409, 'Another installation operation is active') }
+  if (native) {
+    const started = await env.HUBS.getByName('_operations').beginBackup(input.id, engine)
+    if (!started.ok) throw new HttpError(started.status, started.message)
+  }
   return publicJob((await env.DB.prepare('SELECT * FROM installation_jobs WHERE id=?').bind(input.id).first<Job>())!)
 }
 export async function updateBackupPolicy(env: Env, raw: unknown) {
@@ -94,18 +103,21 @@ export async function operatorRoute(request: Request, env: Env, engine: Engine):
   const url = new URL(request.url), path = url.pathname.slice('/api/_operations'.length), method = request.method
   if (request.headers.get('Origin') && request.headers.get('Origin') !== url.origin) throw new HttpError(403, 'Operator requests cannot cross origins')
   if (path === '/status' && method === 'GET') return json(await operationsStatus(env, engine))
+  if (path === '/backup-storage' && method === 'PUT') return json(await saveBackupStorage(env, engine, await readBody(request)))
+  if (path === '/cloud-updates' && method === 'PUT') return json(await saveCloudUpdates(env, await readBody(request)))
   if (path === '/enqueue' && method === 'POST') return json(await queueOperation(env, engine, 'operator', await readBody(request)))
   if (path === '/heartbeat' && method === 'POST') { await env.DB.prepare('UPDATE installation_state SET runner_seen=? WHERE id=1').bind(Date.now()).run(); return json({ ok: true }) }
   if (path === '/claim' && method === 'POST') {
     const input = z.object({ runnerId: z.uuid(), resumeId: z.uuid().optional() }).parse(await readBody(request))
     await env.DB.prepare('UPDATE installation_state SET runner_seen=? WHERE id=1').bind(Date.now()).run()
     const state = await operationState(env)
-    if (!input.resumeId && state.backup_hours && (!state.last_backup || state.last_backup + state.backup_hours * 3600_000 <= Date.now()) && !state.maintenance_job) {
+    if (!await backupConfig(env) && !input.resumeId && state.backup_hours && (!state.last_backup || state.last_backup + state.backup_hours * 3600_000 <= Date.now()) && !state.maintenance_job) {
       const active = await env.DB.prepare("SELECT id FROM installation_jobs WHERE status IN ('queued','running')").first()
       if (!active) await queueOperation(env, engine, 'operator', { id: crypto.randomUUID(), kind: 'backup' })
     }
-    const candidate = input.resumeId ? await env.DB.prepare("SELECT * FROM installation_jobs WHERE id=? AND status IN ('running','failed')").bind(input.resumeId).first<Job>() : await env.DB.prepare("SELECT * FROM installation_jobs WHERE status='queued' ORDER BY created_at LIMIT 1").first<Job>()
+    const candidate = input.resumeId ? await env.DB.prepare("SELECT * FROM installation_jobs WHERE id=? AND status IN ('running','failed')").bind(input.resumeId).first<Job>() : await env.DB.prepare("SELECT * FROM installation_jobs WHERE status='queued' AND (runner_id IS NULL OR runner_id!='native-s3-queued') ORDER BY created_at LIMIT 1").first<Job>()
     if (!candidate) return json({ job: null })
+    if (candidate.kind === 'update' && candidate.checkpoint && state.maintenance_job !== candidate.id) throw new HttpError(409, 'The update snapshot is no longer frozen; request a fresh update and recovery point')
     if (input.resumeId && candidate.runner_id && candidate.runner_id !== input.runnerId) throw new HttpError(409, 'Recovery must use the configured runner identity after stopping the old runner')
     const key = randomToken() + randomToken(), hash = await digest(key)
     const job = await env.DB.prepare(`UPDATE installation_jobs SET status='running',runner_id=?,claim_hash=?,updated_at=?,error=NULL WHERE id=? AND status=? RETURNING *`).bind(input.runnerId, hash, Date.now(), candidate.id, candidate.status).first<Job>()
@@ -128,6 +140,19 @@ export async function operatorRoute(request: Request, env: Env, engine: Engine):
   const match = /^\/jobs\/([^/]+)(?:\/(.*))?$/.exec(path)
   if (!match) throw new HttpError(404, 'Operator route not found')
   const job = await claimed(env, match[1]!, request), action = match[2] || ''
+  if (action.startsWith('recovery-') && method === 'GET') {
+    const recovery = await cloudRecovery(env, job.id)
+    if (action === 'recovery-manifest') return new Response(recovery.bytes, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+    if (action === 'recovery-key') return json({ key: recovery.config.recoveryKey })
+    if (action === 'recovery-payload') {
+      const path = url.searchParams.get('path'), allowed = [...recovery.manifest.tables.flatMap(t => t.parts), ...recovery.manifest.objects, recovery.manifest.secrets].find(p => p.path === path)
+      if (!allowed) throw new HttpError(404, 'Recovery payload not found')
+      const bytes = await boundedBackupBytes(await backupRequest(recovery.config,`${recovery.base}/${allowed.path}`),allowed.encodedSize)
+      return new Response(bytes,{headers:{'Content-Type':'application/octet-stream','Cache-Control':'no-store'}})
+    }
+    throw new HttpError(404, 'Recovery route not found')
+  }
+
   if (action === 'snapshot' && method === 'POST' && job.kind !== 'restore') {
     const state = await operationState(env)
     if (state.maintenance_job && state.maintenance_job !== job.id) throw new HttpError(409, 'Another snapshot is active')
@@ -202,7 +227,7 @@ export async function operatorRoute(request: Request, env: Env, engine: Engine):
     for (const original of input.rows) {
       const row = { ...original }
       if (!keys.length || keys.some(k => row[k] === undefined) || Object.keys(row).some(k => !info.some(c => c.name === k))) throw new HttpError(400, 'Invalid verification record columns')
-      if (input.restored && input.table === 'settings' && ['activeStorageId', 'restored_outbound_disabled'].includes(String(row.key))) continue
+      if (input.restored && input.table === 'settings' && ['activeStorageId', 'restored_outbound_disabled', 'backupStorage', 'cloudUpdates'].includes(String(row.key))) continue
       const actual = await env.DB.prepare(`SELECT * FROM "${input.table}" WHERE ${keys.map(k => `"${k}"=?`).join(' AND ')}`).bind(...keys.map(k => row[k])).first<Record<string, unknown>>()
       if (actual && input.restored) {
         if (input.table === 'auth_account') for (const k of ['access_token', 'refresh_token', 'id_token']) row[k] = null
@@ -245,7 +270,7 @@ export async function operatorRoute(request: Request, env: Env, engine: Engine):
       }
       if (table === 'messages') { row.reply_to_id = null; row.thread_id = null }
       if (table === 'auth_account') for (const key of ['access_token', 'refresh_token', 'id_token']) row[key] = null
-      if (table === 'settings' && ['activeStorageId', 'restored_outbound_disabled'].includes(String(row.key))) continue
+      if (table === 'settings' && ['activeStorageId', 'restored_outbound_disabled', 'backupStorage', 'cloudUpdates'].includes(String(row.key))) continue
       if (table === 'settings' && ['authentication', 'openrouterKey', 'realtimeToken'].includes(String(row.key)) && row.value) {
         if (!input.backupSecret) throw new HttpError(400, 'Backup encryption key is required')
         let value = await decrypt(String(row.value), input.backupSecret)
@@ -302,4 +327,15 @@ async function restoreBatchStorage(env: Env, job: Job) {
   const id = `restore-${job.id}`
   await restoreBatch(env, job, [env.DB.prepare('INSERT INTO storage_configs (id,config) VALUES (?,?)').bind(id, await encrypt(JSON.stringify(config), env.APP_SECRET)), env.DB.prepare("INSERT INTO settings (key,value) VALUES ('activeStorageId',?)").bind(id)])
   return id
+}
+
+export async function scheduleNativeBackup(env: Env, engine: Engine) {
+  const configured = await backupConfig(env)
+  if (!configured?.verified) return
+  const state = await operationState(env)
+  const active = await env.DB.prepare("SELECT id,kind,status,runner_id FROM installation_jobs WHERE status IN ('queued','running') AND requested_by!='operator' ORDER BY created_at LIMIT 1").first<{id:string;kind:string;status:string;runner_id:string|null}>()
+  if (active) { if (active.runner_id === 'native-s3-queued' || active.runner_id === 'native-s3') await env.HUBS.getByName('_operations').beginBackup(active.id,engine); return }
+  const latest = await env.DB.prepare("SELECT max(created_at) AS created FROM installation_jobs WHERE kind='backup'").first<{created:number|null}>()
+  if (state.maintenance_job || !state.backup_hours || Math.max(state.last_backup || 0, latest?.created || 0) + state.backup_hours * 3600_000 > Date.now()) return
+  await queueOperation(env,engine,'scheduled-backup',{id:crypto.randomUUID(),kind:'backup'})
 }

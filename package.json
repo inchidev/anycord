@@ -1,7 +1,7 @@
 {
   "name": "celld-local-chat",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "pretypecheck": "node scripts/write-build-info.mjs",
@@ -23,13 +23,14 @@
     "test:connections": "node scripts/test-connections.mjs",
     "test:servers": "node scripts/test-server-list.mjs",
     "test:viewport": "node scripts/test-mobile-viewport.mjs",
-    "verify": "npm run typecheck && npm run test:contract && npm run test:apps && npm run test:permissions && npm run test:telegram && npm run test:operations && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && npm run build && npm run test:pwa",
+    "verify": "npm run typecheck && npm run test:contract && npm run test:apps && npm run test:permissions && npm run test:telegram && npm run test:operations && npm run test:s3-backups && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && node scripts/test-deployment-verification.mjs && npm run build && npm run test:pwa",
     "prepare:cloudflare": "npm run build && node scripts/prepare-cloudflare-config.mjs",
     "release:package": "node scripts/package-release.mjs",
     "test:pwa": "node scripts/test-pwa.mjs",
     "pretest:telegram": "node scripts/write-build-info.mjs",
     "test:telegram": "node scripts/test-telegram.mjs",
     "test:telegram-launch": "node scripts/test-telegram-launch.mjs && node scripts/test-invitation-installation.mjs",
+    "test:s3-backups": "node scripts/write-build-info.mjs && node scripts/bundle-migrations.mjs && node scripts/build-contract.mjs && node scripts/test-s3-backups.mjs",
     "test:operations": "node scripts/build-contract.mjs && node scripts/test-operation-adapters.mjs && node scripts/test-operations.mjs",
     "test:operations:docker": "node scripts/test-operations-docker.mjs"
   },

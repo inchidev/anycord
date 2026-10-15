@@ -4,10 +4,10 @@ import { readFile, writeFile, mkdir, open, rm } from 'node:fs/promises'
 import { resolve, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
-import { operationClient, executeJob, restoreBackup, verifyBackup, installationOrigin } from './core.mjs'
+import { operationClient, executeJob, restoreBackup, verifyBackup, installationOrigin, downloadS3Backup } from './core.mjs'
 import { activateRelease } from './activate.mjs'
 const [command, configFile, extra] = process.argv.slice(2)
-assert(['run', 'once', 'backup', 'restore', 'resume', 'rollback', 'verify'].includes(command), 'Usage: node operations/cli.mjs <run|once|backup|restore|resume|rollback|verify> /private/operations.json [backup-path|job-id]')
+assert(['run', 'once', 'backup', 'restore', 'resume', 'rollback', 'verify', 'download'].includes(command), 'Usage: node operations/cli.mjs <run|once|backup|restore|resume|rollback|verify|download> /private/operations.json [backup-path|job-id|backup-id]')
 const configPath = resolve(configFile || ''), config = JSON.parse(await readFile(configPath, 'utf8'))
 config.origin = installationOrigin(config.origin)
 assert(['cloudflare', 'celld'].includes(config.engine)); assert(config.backupDirectory && config.releaseDirectory)
@@ -17,7 +17,7 @@ if (config.stateDirectory) assert(!config.backupDirectory.startsWith(resolve(con
 await mkdir(config.releaseDirectory, { recursive: true, mode: 0o700 })
 const identityPath = join(config.releaseDirectory, 'runner-id')
 let runnerId
-try { runnerId = (await readFile(identityPath, 'utf8')).trim() } catch { runnerId = randomUUID(); await writeFile(identityPath, runnerId, { mode: 0o600, flag: 'wx' }) }
+try { runnerId = config.runnerId || (await readFile(identityPath, 'utf8')).trim() } catch { runnerId = randomUUID(); await writeFile(identityPath, runnerId, { mode: 0o600, flag: 'wx' }) }
 const lockPath = join(config.releaseDirectory, 'runner.lock'); let lock
 try { lock = await open(lockPath, 'wx', 0o600); await lock.writeFile(JSON.stringify({ pid: process.pid, origin: config.origin, runnerId })) }
 catch { throw new Error('Another runner or a stale lock exists. Stop the old process and inspect runner.lock before recovery.') }
@@ -37,7 +37,8 @@ async function runClaim(claim) {
   return true
 }
 try {
-  if (command === 'verify') { assert(extra, 'Pass a backup directory'); const { manifest } = await verifyBackup(resolve(extra)); console.log(`Verified backup ${manifest.id}: ${manifest.tables.length} tables, ${manifest.objects.length} objects`) }
+  if (command === 'download') { assert(config.s3 && extra, 'Configure the independent backup S3 destination and pass a backup UUID'); const backup=await downloadS3Backup(config.s3,extra,config.backupDirectory);console.log(`Downloaded and verified encrypted S3 backup ${backup.manifest.id}`) }
+  else if (command === 'verify') { assert(extra, 'Pass a backup directory'); const { manifest } = await verifyBackup(resolve(extra)); console.log(`Verified backup ${manifest.id}: ${manifest.tables.length} tables, ${manifest.objects.length} objects`) }
   else if (command === 'restore') {
     assert(extra, 'Pass a verified backup directory; destination must be empty')
     const timer = setInterval(() => { void client('/heartbeat', { method: 'POST', body: {} }).catch(() => {}) }, 30_000)
@@ -56,7 +57,7 @@ try {
         const claim = await client('/claim', { method: 'POST', body: { runnerId, resumeId: extra } })
         const retargeted = await client(`/jobs/${extra}/rollback`, { method: 'POST', key: claim.key, body: { sourceBuild: backup.manifest.build, backupId: backup.manifest.id, manifestHash: backup.manifestHash } })
         await runClaim({ job: retargeted, key: claim.key })
-      } else await runClaim(await client('/claim', { method: 'POST', body: { runnerId, resumeId: extra } }))
+      } else { const status=await client('/status');const job=status.jobs.find(j=>j.id===extra);assert(job,'Update job not found');if(job.status==='complete')console.log('Update already completed');else await runClaim(await client('/claim', { method: 'POST', body: { runnerId, resumeId: extra } })) }
     }
     else do { await client('/heartbeat', { method: 'POST', body: {} }); await runClaim(await client('/claim', { method: 'POST', body: { runnerId } })); if (command !== 'run') break; await delay(5000) } while (!stopping)
   }
