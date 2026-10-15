@@ -1,3 +1,4 @@
+import { requireOutbound } from './maintenance'
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { authenticationInputSchema, telegramIntegrationInputSchema } from '../shared/contracts'
@@ -65,7 +66,8 @@ const botResult = z.object({ id: z.number().int().positive(), username: z.string
 export class TelegramRequestError extends HttpError {
   constructor(status: number, public retryable: boolean, public retryAfter = 60) { super(status, 'Telegram rejected the request. Check the bot token, permissions and chat access.') }
 }
-export async function botRequest(config: AuthenticationConfig, method: string, body: unknown) {
+export async function botRequest(env: Env, config: AuthenticationConfig, method: string, body: unknown) {
+  await requireOutbound(env)
   let response: Response
   try {
     response = await fetch(`https://api.telegram.org/bot${config.botToken}/${method}`, {
@@ -83,7 +85,7 @@ export async function updateTelegramIntegration(env: Env, ownerId: string, input
   if (input.botToken !== undefined) {
     config.botToken = input.botToken
     if (input.botToken) {
-      const bot = botResult.parse(await botRequest(config, 'getMe', {}))
+      const bot = botResult.parse(await botRequest(env, config, 'getMe', {}))
       if (previous.botId && String(bot.id) !== previous.botId) throw new HttpError(409, 'Remove the old bot before configuring a different bot')
       config.botId = String(bot.id); config.botUsername = bot.username
     } else {
@@ -113,5 +115,5 @@ export async function configureTelegramWebhook(env: Env) {
   const webhookSecret = config.webhookSecret || crypto.randomUUID()
   // Save before the remote request, so a timeout/retry cannot lose the verification secret.
   await persistConfig(env, { ...config, webhookSecret })
-  await botRequest(config, 'setWebhook', { url: telegramStatus(env, config).webhookURL, secret_token: webhookSecret, allowed_updates: ['message', 'my_chat_member'] })
+  await botRequest(env, config, 'setWebhook', { url: telegramStatus(env, config).webhookURL, secret_token: webhookSecret, allowed_updates: ['message', 'my_chat_member'] })
 }

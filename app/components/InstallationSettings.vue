@@ -3,7 +3,7 @@ const api = apiFor()
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { integrationSchema } from '../../shared/contracts'
 import { apiFor } from '../utils/api'
-const props = defineProps<{ tab: 'authentication' | 'integrations' | 'storage' | 'database' }>()
+const props = defineProps<{ tab: 'authentication' | 'integrations' | 'storage' | 'database' | 'operations' }>()
 const tab = computed(() => props.tab)
 const owner = true
 const feedback = ref('')
@@ -38,6 +38,7 @@ async function disconnect(provider: 'realtimeToken' | 'openrouterKey') {
 watch(tab, () => { state.realtimeToken = ''; state.openrouterKey = ''; error.value = ''; feedback.value = '' })
 </script>
 <template>
+          <OperationsSettings v-if="tab === 'operations'" />
           <AuthenticationSettings v-if="tab === 'authentication'" />
           <template v-if="tab === 'integrations'">
             <h2>Integrations</h2><p class="section-description">Connect services for every community on this installation. Credentials stay encrypted on the installation.</p>

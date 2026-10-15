@@ -1,4 +1,5 @@
-import { integer, sqliteTable, text, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
+import { integer, sqliteTable, text, index, uniqueIndex, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(), name: text('name').notNull().unique(),
@@ -74,3 +75,16 @@ export const telegramOutbox = sqliteTable('telegram_outbox', {
   attempts: integer('attempts').notNull().default(0), dueAt: integer('due_at').notNull(),
   status: text('status').notNull().default('pending'),
 }, t => [index('telegram_outbox_due').on(t.status, t.dueAt)])
+
+export const installationState = sqliteTable('installation_state', {
+  id: integer('id').primaryKey(), installationId: text('installation_id').notNull(),
+  maintenanceJob: text('maintenance_job'), outboundDisabled: integer('outbound_disabled').notNull().default(0),
+  runnerSeen: integer('runner_seen'), backupHours: integer('backup_hours').notNull().default(0),
+  retainBackups: integer('retain_backups').notNull().default(7), lastBackup: integer('last_backup'),
+})
+export const installationJobs = sqliteTable('installation_jobs', {
+  id: text('id').primaryKey(), kind: text('kind').notNull(), status: text('status').notNull(), phase: text('phase').notNull(),
+  requestedBy: text('requested_by').notNull(), createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull(),
+  targetVersion: text('target_version'), targetCommit: text('target_commit'), targetSchema: text('target_schema'), targetApiVersion: integer('target_api_version'), runnerId: text('runner_id'), claimHash: text('claim_hash'),
+  checkpoint: text('checkpoint'), result: text('result'), error: text('error'),
+}, t => [uniqueIndex('installation_one_active_job').on(sql`(1)`).where(sql`${t.status} IN ('queued','running')`)])

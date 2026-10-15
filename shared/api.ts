@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { operationsStatusSchema, backupPolicySchema, jobRequestSchema, jobSchema, releaseSchema } from './operations'
 import { passwordProofSchema, recoveryResetSchema, inviteInputSchema, inviteTokenSchema, inviteResultSchema } from './contracts'
 import { authenticationInputSchema, telegramIntegrationInputSchema, telegramIntegrationStatusSchema, telegramPreferencesInputSchema, telegramAccountStatusSchema } from './contracts'
 import {
@@ -28,6 +29,12 @@ function endpoint(method: string, path: string, body: z.ZodType, response: z.Zod
 // The public wire contract, independent of D1, Durable Objects and backend SDKs.
 // Operational migration routes and Better Auth's native endpoints are not public app endpoints.
 export const endpoints = {
+  operations: endpoint('GET', '/api/installation/operations', none, operationsStatusSchema),
+  operationCreate: endpoint('POST', '/api/installation/operations', jobRequestSchema, jobSchema),
+  operationCancel: endpoint('DELETE', '/api/installation/operations/:jobId', none, ok),
+  backupPolicyUpdate: endpoint('PUT', '/api/installation/backup-policy', backupPolicySchema, backupPolicySchema),
+  installationRelease: endpoint('GET', '/api/installation/release', none, releaseSchema),
+  restoredIntegrations: endpoint('POST', '/api/installation/restored-integrations', z.object({ enable: z.literal(true) }), ok),
   runtime: endpoint('GET', '/api/runtime', none, z.object({ apiVersion: z.literal(API_VERSION), engine: engineSchema, auth: z.literal('better-auth'), realtime: z.literal('websocket'), build: z.object({ version: z.string(), commit: z.string(), apiVersion: z.number().int(), schema: z.string() }).optional() })),
   authStatus: endpoint('GET', '/api/auth/status', none, z.object({ initialized: z.boolean(), setupRequired: z.boolean().default(false), user: userSchema.nullable(), methods: authenticationInputSchema.optional() })),
   authentication: endpoint('GET', '/api/installation/authentication', none, authenticationInputSchema),

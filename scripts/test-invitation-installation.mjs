@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdtemp, rm, mkdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { operationClient, createBackup } from '../operations/core.mjs'
 import { resolve, extname } from 'node:path'
 import { createHmac } from 'node:crypto'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
@@ -10,6 +13,10 @@ import { chromium } from 'playwright'
 const root = resolve('.output/public'), botToken = '12345:local-test-token-never-send-to-telegram'
 const types = { '.js':'text/javascript', '.css':'text/css', '.html':'text/html', '.json':'application/json', '.png':'image/png', '.svg':'image/svg+xml' }
 let mf, browser
+const backupDirectory = await mkdtemp(join(tmpdir(), 'anycord-browser-backups-'))
+const buildInfo = JSON.parse(await readFile('shared/build-info.json', 'utf8'))
+const versionParts = buildInfo.version.split('.').map(Number); versionParts[2]++
+const nextRelease = { ...buildInfo, version: versionParts.join('.'), commit: '3'.repeat(40), format: 1, engines: ['cloudflare', 'celld'], artifacts: [] }
 const server = createServer(async (req,res) => {
   try {
     if (req.url.startsWith('/api/')) {
@@ -27,6 +34,8 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 const base=`http://127.0.0.1:${server.address().port}`
 try {
   mf=new Miniflare(convertV4MiniflareOptions({modules:true,modulesRoot:resolve('runtime/cloudflare'),scriptPath:resolve('runtime/cloudflare/worker.js'),compatibilityDate:'2026-10-14',compatibilityFlags:['nodejs_compat'],cf:false,d1Databases:['DB'],r2Buckets:['FILES'],durableObjects:{HUBS:{className:'WorkspaceHub',useSQLite:true},ROOMS:{className:'ChatRoom',useSQLite:true}},bindings:{AUTH_BASE_URL:base,APP_SECRET:crypto.randomUUID(),MIGRATION_TOKEN:'local-migration',SETUP_TOKEN:'local-setup'},outboundService:request=>{
+    if (new URL(request.url).origin === 'https://api.github.com') return Response.json({ tag_name: 'v' + nextRelease.version, immutable: true, draft: false, prerelease: false, body: 'Disposable release fixture', assets: [{ name: 'anycord-release.json' }] })
+    if (new URL(request.url).origin === 'https://github.com') { assert(new URL(request.url).pathname.endsWith('/anycord-release.json')); return Response.json(nextRelease) }
     assert.equal(new URL(request.url).origin,'https://api.telegram.org');assert(new URL(request.url).pathname.endsWith('/getMe'))
     return Response.json({ok:true,result:{id:12345,username:'anycord_test_bot',is_bot:true}})
   }}))
@@ -77,6 +86,43 @@ try {
     assert.equal(await ownerPage.getByRole('dialog').count(),1)
     await ownerPage.getByRole('button',{name:'Back to User Settings',exact:true}).click()
   }
+  await ownerPage.getByRole('button',{name:'Installation Settings',exact:true}).click()
+  await ownerPage.getByRole('button',{name:'Backups & updates',exact:true}).click()
+  await ownerPage.getByRole('heading',{name:'Backups & updates',exact:true}).waitFor()
+  assert(await ownerPage.getByRole('button',{name:'Create backup',exact:true}).isDisabled())
+  await ownerPage.getByText('Operations runner is offline',{exact:true}).waitFor()
+  process.env.ANYCORD_BROWSER_TEST_MIGRATION_TOKEN='local-migration'
+  const operator=operationClient({origin:base,migrationTokenEnv:'ANYCORD_BROWSER_TEST_MIGRATION_TOKEN'})
+  await operator('/heartbeat',{method:'POST',body:{}})
+  await ownerPage.getByRole('button',{name:'Refresh runner status',exact:true}).click()
+  await ownerPage.getByText('Runner connected · backups are kept outside the application by your operator.',{exact:true}).waitFor()
+  await ownerPage.getByLabel('Back up every (hours)',{exact:true}).fill('12')
+  await ownerPage.getByLabel('Keep recent recovery points',{exact:true}).fill('2')
+  await ownerPage.getByRole('button',{name:'Save backup policy',exact:true}).click()
+  await ownerPage.getByText('Backup schedule and retention saved.',{exact:true}).waitFor()
+  assert.deepEqual((await operator('/status')).policy,{backupHours:12,retainBackups:2})
+  await ownerPage.getByRole('button',{name:'Create backup',exact:true}).click()
+  await ownerPage.getByText('Waiting for runner',{exact:true}).waitFor()
+  const claim=await operator('/claim',{method:'POST',body:{runnerId:crypto.randomUUID()}})
+  await operator(`/jobs/${claim.job.id}/snapshot`,{method:'POST',key:claim.key,body:{}})
+  await ownerPage.getByText('Copying frozen data and files',{exact:true}).waitFor()
+  await ownerPage.getByText('Installation is in maintenance',{exact:true}).waitFor()
+  const backup=await createBackup(operator,claim.job,claim.key,backupDirectory)
+  await ownerPage.getByText(backup.manifest.id,{exact:true}).waitFor()
+  await ownerPage.getByText('Installation is in maintenance',{exact:true}).waitFor({state:'hidden'})
+  const update=ownerPage.getByRole('button',{name:'Back up and update to '+nextRelease.version,exact:true})
+  await update.click();await ownerPage.getByText('Waiting for runner',{exact:true}).waitFor()
+  await ownerPage.getByRole('button',{name:'Cancel operation',exact:true}).click()
+  await ownerPage.getByRole('button',{name:'Cancel operation',exact:true}).waitFor({state:'hidden'})
+  assert.equal((await operator('/status')).jobs[0].phase,'cancelled')
+  await mkdir('output/operations',{recursive:true})
+  for(const viewport of [{width:390,height:844},{width:1280,height:900}]) {
+    await ownerPage.setViewportSize(viewport)
+    assert(await ownerPage.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'No page overflow')
+    const card=ownerPage.locator('.operations-settings');assert(await card.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'No operations panel overflow')
+    await ownerPage.screenshot({path:`output/operations/settings-${viewport.width}.png`})
+  }
+  console.log('PASS actual owner operations UI at 390/1280px: offline guard, runner heartbeat, saved policy, real Worker backup/maintenance/progress/checkpoint, exact release choice and cancellation')
   await ownerPage.keyboard.press('Escape');await ownerPage.getByRole('dialog').waitFor({state:'hidden'})
   console.log('PASS actual local installation owner settings: authentication policy loads, scope/back repeats in one dialog and Escape closes')
-}finally{await browser?.close();await mf?.dispose();await new Promise(resolve=>server.close(resolve))}
+}finally{delete process.env.ANYCORD_BROWSER_TEST_MIGRATION_TOKEN;await browser?.close();await mf?.dispose();await new Promise(resolve=>server.close(resolve));await rm(backupDirectory,{recursive:true,force:true})}

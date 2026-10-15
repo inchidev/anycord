@@ -107,6 +107,12 @@ Remote clients use `connectionLogin` instead of browser cookies. `authStatus` is
 
 `GET /api/runtime` may additionally include `build: { version, commit, apiVersion, schema }`. Both shipped adapters include it; the optional field preserves API v1 compatibility with existing clients/adapters. `/api/health` includes the same build identity alongside the applied database schema. Public `/version.json` identifies the generated client. Release verification requires all three to agree. Clients check the runtime API version before mutations/uploads and refuse incompatible backends.
 
+## Installation operations
+
+Installation-owner endpoints are `operations` / `operationCreate` (GET / POST `/api/installation/operations`), `operationCancel` (DELETE `/api/installation/operations/:jobId`), `backupPolicyUpdate` (PUT `/api/installation/backup-policy`), `installationRelease` (GET `/api/installation/release`) and `restoredIntegrations` (POST `/api/installation/restored-integrations`). They expose sanitized jobs, installed/latest release identity, runner heartbeat, maintenance, policy and checkpoint summaries. Create requests carry an idempotency UUID and choose backup or an explicit stable update version. Community ownership grants no access.
+
+The privileged `/api/_operations/*` protocol requires the installation migration token; job payloads additionally require a private fenced claim. It is an operator interface, never a browser backup download API. Shared schemas live in `shared/operations.ts`. Whole-installation freeze rejects normal API activity with 503 while owner status/cancellation and authenticated operator recovery remain available. SQLite triggers also reject in-flight writes. A failed update/restore remains frozen until explicit recovery; failed/cancelled backups release the lock. Restores revoke sessions and block outbound integrations until owner review. See [the operations contract and recovery guide](docs/operations.md).
+
 ## Community access and recovery — 2026-10-15
 
 - `invites` / `inviteCreate`: GET / POST `/api/workspaces/:workspaceId/invites`. Owner-only; creation accepts `expiresInHours` (1–720, default 168) and `maxUses` (1–1000, default 25), returns 201 with a secret token shown once. Lists contain only IDs, timestamps and usage counts. `inviteRevoke` deletes only an invitation in the authorized workspace.

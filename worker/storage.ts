@@ -181,3 +181,36 @@ export async function cleanupAttachments(env: Env) {
   }
   await env.DB.prepare('DELETE FROM live_tickets WHERE expires_at < ?').bind(Date.now()).run()
 }
+
+// Operator-only callers are authenticated and fenced in installation-operations.
+export async function backupObject(env: Env, id: string) {
+  const row = await database(env).select().from(attachments).where(eq(attachments.id, id)).get()
+  if (!row?.messageId || row.status !== 'uploaded') throw new HttpError(404, 'Committed attachment not found')
+  const config = await loadConfig(env, row.storageId)
+  if (config.driver === 'r2') {
+    const object = await env.FILES.get(row.objectKey)
+    if (!object) throw new HttpError(404, 'Attachment object is missing')
+    return new Response(object.body, { headers: { 'Content-Length': String(row.size) } })
+  }
+  const response = await s3Request(config, row.objectKey, 'GET')
+  if (!response.ok) throw new HttpError(502, 'Attachment storage read failed')
+  return response
+}
+export async function restoreObject(env: Env, id: string, request: Request) {
+  const row = await database(env).select().from(attachments).where(eq(attachments.id, id)).get()
+  if (!row) throw new HttpError(404, 'Restore attachment not found')
+  const reader = request.body?.getReader()
+  if (!reader) throw new HttpError(400, 'Attachment body missing')
+  const chunks: Uint8Array[] = []; let size = 0
+  while (true) {
+    const item = await reader.read(); if (item.done) break
+    size += item.value.byteLength
+    if (size > row.size || size > MAX_ATTACHMENT_BYTES) { await reader.cancel(); throw new HttpError(413, 'Attachment size mismatch') }
+    chunks.push(item.value)
+  }
+  if (size !== row.size) throw new HttpError(400, 'Attachment size mismatch')
+  const bytes = new Uint8Array(size); let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  await put(env, await loadConfig(env, row.storageId), row.objectKey, bytes)
+  return { ok: true as const }
+}

@@ -7,7 +7,7 @@ const emit = defineEmits<{ logout: [] }>()
 const host = new URL(getApiTarget().origin || window.location.origin).host
 const scope = ref<'account' | 'installation'>('account')
 const tab = ref('account')
-const installationTab = ref<'authentication' | 'integrations' | 'storage' | 'database'>('authentication')
+const installationTab = ref<'authentication' | 'integrations' | 'storage' | 'database' | 'operations'>('authentication')
 watch(open, value => {
   if (value) { scope.value = props.user.role === 'owner' && props.initialScope === 'installation' ? 'installation' : 'account'; tab.value = 'account'; installationTab.value = 'authentication' }
 }, { immediate: true })
@@ -28,6 +28,7 @@ watch(open, value => {
         <button :class="{ active: installationTab === 'integrations' }" @click="installationTab = 'integrations'"><UIcon name="i-lucide-plug" />Integrations</button>
         <button :class="{ active: installationTab === 'storage' }" @click="installationTab = 'storage'"><UIcon name="i-lucide-hard-drive" />File storage</button>
         <button :class="{ active: installationTab === 'database' }" @click="installationTab = 'database'"><UIcon name="i-lucide-database" />Database</button>
+        <button :class="{ active: installationTab === 'operations' }" @click="installationTab = 'operations'"><UIcon name="i-lucide-archive" />Backups &amp; updates</button>
       </template>
     </template>
     <InstallationSettings v-if="scope === 'installation' && user.role === 'owner' && open" :tab="installationTab" />
