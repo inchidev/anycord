@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { slackWebhookChecks } from './test-slack-webhooks.mjs'
 import { build } from 'esbuild'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -29,7 +29,15 @@ try {
       return Response.json(event.type === 'command.invoked' ? { text: `Hello ${event.data.arguments.name}` } : { ok: true })
     }
     const passwordFallback = fileURLToPath(new URL('./password.mjs', import.meta.resolve('@better-auth/utils/password')))
-    await build({ stdin: { contents: `import handler from './worker/${engine === 'celld' ? 'index' : 'cloudflare'}'; export { WorkspaceHub, ChatRoom } from './worker/index'; import { flushAppEvents } from './worker/apps'; export default { ...handler, async fetch(request, env) { if (new URL(request.url).pathname === '/_test/flush') { await flushAppEvents(env); return Response.json({ok:true}) } const pending = []; const response = await handler.fetch(request, env, { waitUntil: p => pending.push(p) }); await Promise.all(pending); return response } }`, resolveDir: process.cwd(), loader: 'ts' }, outfile: join(dir, `${engine}.mjs`), bundle: true, format: 'esm', target: 'es2022', conditions: ['workerd', 'worker', 'browser'], alias: { '@better-auth/utils/password': passwordFallback }, external: ['cloudflare:*', 'node:*'] })
+    await build({ stdin: { contents: `import handler from './worker/${engine === 'celld' ? 'index' : 'cloudflare'}'; export { WorkspaceHub, ChatRoom } from './worker/index'; import { flushAppEvents } from './worker/apps'; export default { ...handler, async fetch(request, env) { if (new URL(request.url).pathname === '/_test/flush') { await flushAppEvents(env); return Response.json({ok:true}) } const pending = []; const response = await handler.fetch(request, env, { waitUntil: p => pending.push(p) }); await Promise.all(pending); return response } }`, resolveDir: process.cwd(), loader: 'ts' }, outfile: join(dir, `${engine}.mjs`), bundle: true, format: 'esm', target: 'es2022', conditions: ['workerd', 'worker', 'browser'], alias: { '@better-auth/utils/password': passwordFallback }, external: ['cloudflare:*', 'node:*'], plugins: [{ name: 'fixed-rate-window', setup(builder) {
+      // Keep rate-limit assertions in one window even when CI crosses a minute.
+      // Only the Hub bucket clock is pinned; auth expiry and delivery clocks stay real.
+      builder.onLoad({ filter: /worker\/hub\.ts$/ }, async ({ path }) => {
+        const source = await readFile(path, 'utf8'), bucket = 'const bucket = Math.floor(Date.now() / 60_000)'
+        assert(source.includes(bucket))
+        return { contents: source.replace(bucket, 'const bucket = 1'), loader: 'ts' }
+      })
+    } }] })
     mf = new Miniflare(convertV4MiniflareOptions({ modules: true, modulesRoot: dir, scriptPath: join(dir, `${engine}.mjs`), compatibilityDate: '2026-10-14', compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB'], durableObjects: { HUBS: { className: 'WorkspaceHub', useSQLite: true }, ROOMS: { className: 'ChatRoom', useSQLite: true } }, cf: false,
       bindings: { AUTH_BASE_URL: base, APP_SECRET: crypto.randomUUID(), MIGRATION_TOKEN: 'migration' }, serviceBindings: { ASSETS: () => new Response('Anycord') }, outboundService: provider }))
     await mf.ready
