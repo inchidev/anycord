@@ -109,5 +109,32 @@
       "INSERT INTO role_permissions (role_id, permission) SELECT id, 'voice.speak' FROM roles WHERE id = 'everyone:' || workspace_id;",
       "INSERT INTO role_permissions (role_id, permission) SELECT id, 'ai.ask' FROM roles WHERE id = 'everyone:' || workspace_id;"
     ]
+  },
+  {
+    "name": "0009_strong_spiral",
+    "statements": [
+      "CREATE TABLE `app_audit` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`workspace_id` text NOT NULL,\n\t`app_id` text,\n\t`actor_id` text NOT NULL,\n\t`action` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE INDEX `app_audit_workspace` ON `app_audit` (`workspace_id`,`created_at`);",
+      "CREATE TABLE `app_invocations` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`app_id` text NOT NULL,\n\t`channel_id` text NOT NULL,\n\t`user_id` text NOT NULL,\n\t`request_hash` text NOT NULL,\n\t`status` text NOT NULL,\n\t`message_id` text,\n\t`error` text,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`app_id`) REFERENCES `server_apps`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`channel_id`) REFERENCES `channels`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE TABLE `app_message_requests` (\n\t`app_id` text NOT NULL,\n\t`request_id` text NOT NULL,\n\t`request_hash` text NOT NULL,\n\t`message_id` text NOT NULL,\n\tPRIMARY KEY(`app_id`, `request_id`),\n\tFOREIGN KEY (`app_id`) REFERENCES `server_apps`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE TABLE `app_outbox` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`app_id` text NOT NULL,\n\t`channel_id` text NOT NULL,\n\t`type` text NOT NULL,\n\t`payload` text NOT NULL,\n\t`status` text DEFAULT 'pending' NOT NULL,\n\t`attempts` integer DEFAULT 0 NOT NULL,\n\t`due_at` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`lease` text,\n\t`last_error` text,\n\tFOREIGN KEY (`app_id`) REFERENCES `server_apps`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`channel_id`) REFERENCES `channels`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE INDEX `app_outbox_due` ON `app_outbox` (`status`,`due_at`);",
+      "CREATE TABLE `server_apps` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`workspace_id` text NOT NULL,\n\t`bot_user_id` text NOT NULL,\n\t`name` text NOT NULL,\n\t`avatar_url` text DEFAULT '' NOT NULL,\n\t`kind` text NOT NULL,\n\t`channel_ids` text NOT NULL,\n\t`enabled` integer NOT NULL,\n\t`endpoint_url` text DEFAULT '' NOT NULL,\n\t`events` text NOT NULL,\n\t`commands` text NOT NULL,\n\t`token_hash` text NOT NULL,\n\t`signing_secret` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`uninstalled_at` integer,\n\tFOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`bot_user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE UNIQUE INDEX `server_apps_bot_user_id_unique` ON `server_apps` (`bot_user_id`);",
+      "CREATE INDEX `server_apps_workspace` ON `server_apps` (`workspace_id`);",
+      "ALTER TABLE `messages` ADD `app_id` text REFERENCES server_apps(id);",
+      "ALTER TABLE `messages` ADD `app_request_id` text;",
+      "ALTER TABLE `messages` ADD `app_request_hash` text;",
+      "CREATE UNIQUE INDEX `messages_app_request` ON `messages` (`app_id`,`app_request_id`);",
+      "-- Enqueue in the message transaction: a process crash cannot lose an acknowledged event.\nCREATE TRIGGER app_message_event AFTER INSERT ON messages\nWHEN (SELECT role FROM users WHERE id = NEW.author_id) != 'bot'\nBEGIN\n  INSERT INTO app_outbox (id, app_id, channel_id, type, payload, due_at, created_at)\n  SELECT a.id || ':' || NEW.id, a.id, NEW.channel_id, 'message.created',\n    json_object('id', a.id || ':' || NEW.id, 'type', 'message.created', 'createdAt', NEW.created_at,\n      'data', json_object('workspaceId', a.workspace_id, 'channelId', NEW.channel_id, 'messageId', NEW.id,\n        'authorId', NEW.author_id, 'text', NEW.text, 'threadId', NEW.thread_id)), NEW.created_at, NEW.created_at\n  FROM server_apps a JOIN channels c ON c.workspace_id = a.workspace_id AND c.id = NEW.channel_id\n  WHERE a.enabled = 1 AND a.uninstalled_at IS NULL AND a.endpoint_url != ''\n    AND EXISTS (SELECT 1 FROM json_each(a.channel_ids) WHERE value = NEW.channel_id)\n    AND EXISTS (SELECT 1 FROM json_each(a.events) WHERE value = 'message.created')\n    AND EXISTS (SELECT 1 FROM settings s, json_each(s.value, '$.allowedOrigins') origin\n      WHERE s.key = 'appsPolicy' AND json_extract(s.value, '$.enabled') = 1\n      AND substr(a.endpoint_url, 1, length(origin.value) + 1) = origin.value || '/')\n  ON CONFLICT(id) DO NOTHING;\nEND;",
+      "CREATE TRIGGER app_install_limit BEFORE INSERT ON server_apps\nWHEN (SELECT count(*) FROM server_apps WHERE workspace_id = NEW.workspace_id AND uninstalled_at IS NULL) >= 20\nBEGIN\n  SELECT RAISE(ABORT, 'Server app limit reached');\nEND;"
+    ]
+  },
+  {
+    "name": "0010_cute_blob",
+    "statements": [
+      "CREATE TABLE `app_slack_webhooks` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`app_id` text NOT NULL,\n\t`channel_id` text NOT NULL,\n\t`token_hash` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`app_id`) REFERENCES `server_apps`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`channel_id`) REFERENCES `channels`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE UNIQUE INDEX `app_slack_webhooks_channel` ON `app_slack_webhooks` (`app_id`,`channel_id`);"
+    ]
   }
 ]

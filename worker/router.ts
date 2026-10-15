@@ -1,3 +1,4 @@
+import { handleAppManagement, incomingSlackWebhook, incomingAppMessage, commandRegistry, invokeCommand, invocationResult, flushAppEvents } from './apps'
 import { requirePermission, serverAccess, initializeRoles, permissionsView, type PermissionMutation } from './permissions'
 import { roleInputSchema, memberRolesInputSchema, overridesInputSchema } from '../shared/contracts'
 import { z, ZodError } from 'zod'
@@ -40,6 +41,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     if (engine === 'celld' && response.status === 404 && !path.split('/').filter(Boolean).at(-1)?.includes('.')) return env.ASSETS.fetch(new Request(new URL('/', request.url), request))
     return response
   }
+  if (path.startsWith('/api/compat/slack/services/')) return incomingSlackWebhook(env, request)
   const endpoint = matchEndpoint(method, path)
   if (endpoint?.name === 'runtime') return json({ apiVersion: API_VERSION, engine, auth: 'better-auth', realtime: 'websocket', build: buildInfo })
   if (path === '/api/_runtime') return json({ ok: true })
@@ -177,8 +179,20 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     }
     return createAuth(env).handler(request)
   }
+  if (endpoint?.name === 'appPost') return incomingAppMessage(env, endpoint.params.appId!, request)
   const user = await requireUser(request, env)
   if (!['GET', 'HEAD'].includes(method) && !await hub(env, '_auth').consumeRate(`writes:${user.id}`, 90)) throw new HttpError(429, 'You are sending too quickly. Try again in a minute.')
+  if (endpoint) {
+    const appResponse = await handleAppManagement(env, user, endpoint.name, endpoint.params, request)
+    if (appResponse) return appResponse
+    if (endpoint.name === 'commands') return json(await commandRegistry(env, user, endpoint.params.channelId!))
+    if (endpoint.name === 'commandInvoke') {
+      const response = await invokeCommand(env, user, endpoint.params.channelId!, request)
+      ctx.waitUntil(flushAppEvents(env))
+      return response
+    }
+    if (endpoint.name === 'commandResult') return json(await invocationResult(env, user, endpoint.params.channelId!, endpoint.params.invocationId!))
+  }
   if (endpoint?.name === 'recoveryStatus') {
     const row = await env.DB.prepare('SELECT COUNT(*) AS count, MAX(created_at) AS generatedAt FROM recovery_keys WHERE user_id = ? AND claim_id IS NULL').bind(user.id).first()
     return json(row)
@@ -466,6 +480,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       if (message.authorId !== user.id || message.threadId !== (input.threadId || null) || message.replyToId !== (input.replyToId || null) || message.text !== input.text || JSON.stringify(message.attachments.map(f => f.id).sort()) !== JSON.stringify(fileIds.slice().sort())) throw new HttpError(409, 'Message ID already exists for a different message')
       if (inserted) {
         await publish(env, channel.workspaceId, { type: 'message', message })
+        ctx.waitUntil(flushAppEvents(env))
         ctx.waitUntil(queueTelegramNotifications(env, channel.workspaceId, message).then(() => flushTelegramNotifications(env)).catch(() => { console.warn(JSON.stringify({ event: 'telegram_enqueue_failed' })) }))
       }
       return json(message, inserted ? 201 : 200)
@@ -557,6 +572,7 @@ return {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (event.cron !== '* * * * *') ctx.waitUntil(cleanupAttachments(env))
     ctx.waitUntil(flushTelegramNotifications(env))
+    ctx.waitUntil(flushAppEvents(env))
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const origin = request.headers.get('Origin')
@@ -566,7 +582,7 @@ return {
       try { const parsed = new URL(origin); if (parsed.origin !== origin || (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)))) return json({ message: 'Invalid remote origin' }, 403) } catch { return json({ message: 'Invalid origin' }, 403) }
       Object.assign(cors, { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' })
     }
-    if (request.method === 'OPTIONS' && new URL(request.url).pathname.startsWith('/api/')) return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } })
+    if (request.method === 'OPTIONS' && new URL(request.url).pathname.startsWith('/api/')) return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key', 'Access-Control-Max-Age': '600' } })
     try {
       const response = await route(request, env, engine, ctx)
       if (response.status === 101) return response
@@ -590,7 +606,7 @@ return {
     } catch (error) {
       if (error instanceof ZodError) return json({ message: error.issues[0]?.message || 'Invalid input' }, 400, cors)
       if (error instanceof URIError) return json({ message: 'Invalid path encoding' }, 400, cors)
-      if (error instanceof HttpError) return json({ message: error.message }, error.status, cors)
+      if (error instanceof HttpError) return json({ message: error.message }, error.status, { ...cors, ...(error.status === 429 ? { 'Retry-After': '60' } : {}) })
       console.error(JSON.stringify({ event: 'request_failed', kind: error instanceof Error ? error.name : 'Unknown' }))
       return json({ message: 'Something went wrong. Try again.' }, 500, cors)
     }

@@ -37,7 +37,7 @@ export async function decrypt(value: string, secret: string) {
   const [iv = '', data = ''] = value.split(':')
   return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unhex(iv) }, await encryptionKey(secret), unhex(data)))
 }
-export async function readBody(request: Request, maxBytes = 20_000) {
+export async function readBody(request: Pick<Request, 'headers' | 'body'>, maxBytes = 20_000) {
   if (!request.headers.get('Content-Type')?.includes('application/json')) throw new HttpError(415, 'Use application/json')
   const reader = request.body?.getReader()
   if (!reader) throw new HttpError(400, 'Request body required')

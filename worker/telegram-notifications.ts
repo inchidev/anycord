@@ -66,6 +66,8 @@ export function mentionsUser(text: string, name: string) {
   return new RegExp(`(?:^|\\s)@${escaped}(?=$|[\\s.,!?:;])`, 'iu').test(text)
 }
 export async function queueTelegramNotifications(env: Env, workspaceId: string, message: Message) {
+  // Apps never create Telegram mention/reply alerts in this milestone.
+  if (message.bot) return
   const config = await authenticationConfig(env)
   if (!config.notifications || !config.botToken) return
   const recipients = await env.DB.prepare(`SELECT p.user_id AS userId, u.name FROM telegram_preferences p

@@ -5,7 +5,7 @@ import { authUsers, authAccounts } from '../db/auth-schema'
 import { profileImage } from '../shared/profile'
 
 export const telegramProfileJoin = and(eq(authAccounts.userId, users.id), eq(authAccounts.providerId, 'telegram'))
-const name = sql<string>`coalesce(nullif(${authUsers.name}, ''), ${users.name})`
+const name = sql<string>`coalesce((SELECT name FROM server_apps WHERE bot_user_id = ${users.id}), nullif(${authUsers.name}, ''), ${users.name})`
 const telegramId = sql<string>`case when ${authUsers.email} like 'telegram-%@identity.anycord.invalid'
   then substr(${authUsers.email}, 10, instr(${authUsers.email}, '@') - 10) else ${authAccounts.accountId} end`
 const suffix = sql<string>`' · tg:' || ${telegramId}`
@@ -14,9 +14,10 @@ const suffix = sql<string>`' · tg:' || ${telegramId}`
 // from presentation, after joining the account belonging to this user.
 export const publicProfileName = sql<string>`case when substr(${name}, -length(${suffix})) = ${suffix}
   then substr(${name}, 1, length(${name}) - length(${suffix})) else ${name} end`
+export const publicProfileAvatar = sql<string | null>`coalesce((SELECT nullif(avatar_url, '') FROM server_apps WHERE bot_user_id = ${users.id}), ${authUsers.image})`
 export const profileColumns = {
   id: users.id, name: publicProfileName, color: users.color, role: users.role,
-  avatarUrl: authUsers.image,
+  avatarUrl: publicProfileAvatar,
   telegram: sql<boolean>`${authAccounts.id} is not null`.mapWith(Boolean),
 }
 

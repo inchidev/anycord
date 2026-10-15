@@ -129,6 +129,12 @@ export class WorkspaceHub extends DurableObject<Env> {
           const calls = await this.env.DB.prepare('SELECT p.id, p.user_id AS userId, p.channel_id AS channelId FROM huddle_participants p JOIN channels c ON c.id = p.channel_id WHERE c.workspace_id = ?').bind(workspaceId).all<{ id: string; userId: string; channelId: string }>()
           for (const call of calls.results) await leaveHuddle(this.env, call.channelId, call.id, call.userId)
         }
+        // Permission revocation also fences replies already awaiting an app endpoint.
+        // The command writer checks pending status in its atomic message insert.
+        if (action.kind !== 'create') change.statements.push(
+          this.env.DB.prepare("UPDATE app_outbox SET status='cancelled',lease=NULL WHERE type='command.invoked' AND status IN ('pending','sending') AND app_id IN (SELECT id FROM server_apps WHERE workspace_id=?)").bind(workspaceId),
+          this.env.DB.prepare("UPDATE app_invocations SET status='cancelled',error='Channel permissions changed. Run the command again.' WHERE status='pending' AND app_id IN (SELECT id FROM server_apps WHERE workspace_id=?)").bind(workspaceId),
+        )
         await this.env.DB.batch(change.statements)
         try { await this.emitNow({ type: 'permissions', endHuddles: action.kind !== 'create' }) } catch { console.warn(JSON.stringify({ event: 'permissions_broadcast_failed', workspaceId })) }
         return { ok: true as const, value: change.result }

@@ -116,3 +116,9 @@ Remote clients use `connectionLogin` instead of browser cookies. `authStatus` is
 - `recoveryReset`: POST `/api/recovery/reset` with `{ name, recoveryKey, password }`; rate-limited and available without a session. An atomic batch claims the key, updates the Better Auth credential password, deletes current/legacy sessions and deletes the whole key set. Realtime sockets are closed; identity, profile, memberships and messages remain. Incorrect keys or usernames return the same generic 400. The user signs in again and generates a fresh set. Realtime closure is best effort if a Hub is unavailable; revoked sessions cannot reconnect.
 
 Registration and recovery forms confirm the new password client-side. The confirmation field is not part of the wire credentials and is stripped before transport. Keys are installation-specific; recovery is performed at that installation's origin.
+
+## Server apps
+
+The shared app contract covers installation policy, server-owner app lifecycle, channel grants, independent bot credentials, incoming webhook idempotency, command registries/invocations/results and signed outbound events. See [the app API guide and examples](docs/apps.md). Both implemented engines use the same handlers and migrations.
+
+Slack-compatible incoming webhooks use channel-bound capability URLs under `/api/compat/slack/services/:workspaceId/:webhookId/:token`, accept the documented text-only JSON subset and return plain-text `ok` or a stable error. Owner-only lifecycle endpoints create/rotate/revoke URLs; optional `Idempotency-Key` uses the same durable bot receipts and guarded writes as the native API. See the [supported subset](docs/apps.md#slack-compatible-incoming-webhooks).

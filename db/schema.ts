@@ -30,9 +30,10 @@ export const channels = sqliteTable('channels', {
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(), channelId: text('channel_id').notNull().references(() => channels.id), authorId: text('author_id').notNull().references(() => users.id),
   text: text('text').notNull(), createdAt: integer('created_at').notNull(), editedAt: integer('edited_at'),
+  appId: text('app_id').references((): AnySQLiteColumn => serverApps.id), appRequestId: text('app_request_id'), appRequestHash: text('app_request_hash'),
   replyToId: text('reply_to_id'),
   threadId: text('thread_id').references((): AnySQLiteColumn => threads.id, { onDelete: 'cascade' }),
-}, (t) => [index('messages_channel_time').on(t.channelId, t.createdAt), index('messages_thread_time').on(t.threadId, t.createdAt)])
+}, (t) => [uniqueIndex('messages_app_request').on(t.appId, t.appRequestId), index('messages_channel_time').on(t.channelId, t.createdAt), index('messages_thread_time').on(t.threadId, t.createdAt)])
 export const threads = sqliteTable('threads', {
   id: text('id').primaryKey(), channelId: text('channel_id').notNull().references(() => channels.id),
   parentMessageId: text('parent_message_id').unique().references((): AnySQLiteColumn => messages.id, { onDelete: 'set null' }),
@@ -75,6 +76,40 @@ export const telegramOutbox = sqliteTable('telegram_outbox', {
   status: text('status').notNull().default('pending'),
 }, t => [index('telegram_outbox_due').on(t.status, t.dueAt)])
 
+// Bot profiles outlive uninstall so historical messages retain their identity.
+export const serverApps = sqliteTable('server_apps', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  botUserId: text('bot_user_id').notNull().unique().references(() => users.id), name: text('name').notNull(), avatarUrl: text('avatar_url').notNull().default(''),
+  kind: text('kind').notNull(), channelIds: text('channel_ids').notNull(), enabled: integer('enabled').notNull(),
+  endpointUrl: text('endpoint_url').notNull().default(''), events: text('events').notNull(), commands: text('commands').notNull(),
+  tokenHash: text('token_hash').notNull(), signingSecret: text('signing_secret').notNull(),
+  createdAt: integer('created_at').notNull(), uninstalledAt: integer('uninstalled_at'),
+}, t => [index('server_apps_workspace').on(t.workspaceId)])
+export const appAudit = sqliteTable('app_audit', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
+  appId: text('app_id'), actorId: text('actor_id').notNull(), action: text('action').notNull(), createdAt: integer('created_at').notNull(),
+}, t => [index('app_audit_workspace').on(t.workspaceId, t.createdAt)])
+export const appInvocations = sqliteTable('app_invocations', {
+  id: text('id').primaryKey(), appId: text('app_id').notNull().references(() => serverApps.id), channelId: text('channel_id').notNull().references(() => channels.id),
+  userId: text('user_id').notNull().references(() => users.id), requestHash: text('request_hash').notNull(),
+  status: text('status').notNull(), messageId: text('message_id'), error: text('error'), createdAt: integer('created_at').notNull(),
+})
+export const appOutbox = sqliteTable('app_outbox', {
+  id: text('id').primaryKey(), appId: text('app_id').notNull().references(() => serverApps.id), channelId: text('channel_id').notNull().references(() => channels.id),
+  type: text('type').notNull(), payload: text('payload').notNull(), status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0), dueAt: integer('due_at').notNull(), createdAt: integer('created_at').notNull(),
+  lease: text('lease'), lastError: text('last_error'),
+}, t => [index('app_outbox_due').on(t.status, t.dueAt)])
+// Receipts survive message deletion, so an uncertain retry cannot resurrect a post.
+export const appMessageRequests = sqliteTable('app_message_requests', {
+  appId: text('app_id').notNull().references(() => serverApps.id), requestId: text('request_id').notNull(),
+  requestHash: text('request_hash').notNull(), messageId: text('message_id').notNull(),
+}, t => [primaryKey({ columns: [t.appId, t.requestId] })])
+// Independent, channel-bound capability URLs for Slack incoming webhook senders.
+export const appSlackWebhooks = sqliteTable('app_slack_webhooks', {
+  id: text('id').primaryKey(), appId: text('app_id').notNull().references(() => serverApps.id),
+  channelId: text('channel_id').notNull().references(() => channels.id), tokenHash: text('token_hash').notNull(), createdAt: integer('created_at').notNull(),
+}, t => [uniqueIndex('app_slack_webhooks_channel').on(t.appId, t.channelId)])
 export const roles = sqliteTable('roles', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   name: text('name').notNull(), color: text('color').notNull().default('#949ba4'), position: integer('position').notNull(),

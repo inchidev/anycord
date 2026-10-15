@@ -64,6 +64,7 @@ watch(tab, () => { state.realtimeToken = ''; state.openrouterKey = ''; error.val
               <UButton v-if="owner" type="submit" :loading="save.isPending.value">Save Changes</UButton>
             </UForm>
             <div class="telegram-integration"><TelegramIntegration /></div>
+            <AppPolicySettings />
           </template>
           <div v-if="tab === 'storage'"><StorageSettings v-if="owner" /></div>
           <template v-if="tab === 'database'">
