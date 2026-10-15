@@ -93,10 +93,10 @@ export async function slackWebhookChecks({ mf, db, base, request, owner, member,
   finishBody()
   const denied = await inFlight
   // Revocation can reject headers before the unfinished upload reaches the
-  // Worker. Undici then reports an early EPIPE instead of delivering its 403.
+  // Worker. Undici can report EPIPE/ECONNRESET instead of delivering its 403.
   // The durable no-write check and subsequent 404 also prove the runtime is
   // alive and the credential is revoked; other transport failures still fail.
-  if (denied.error) assert.equal(denied.error.cause?.code, 'EPIPE')
+  if (denied.error) assert(['EPIPE', 'ECONNRESET'].includes(denied.error.cause?.code), 'Only an early upload termination is expected')
   else { assert([403, 404].includes(denied.response.status)); await denied.response.body?.cancel() }
   assert.equal(await db.prepare('SELECT count(*) AS n FROM messages WHERE app_id = ? AND text = ?').bind(bot.app.id, 'Racing revocation').first('n'), 0, 'A request whose body finishes after revocation cannot post')
   await send(latest.url, { status: 404, expected: 'invalid_token' }); await send(hook2.url, { status: 404, expected: 'invalid_token' })
