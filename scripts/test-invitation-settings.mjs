@@ -6,10 +6,10 @@ import { mkdir } from 'node:fs/promises'
 export async function invitationSettingsChecks(browser, base, build, signed, launch, member) {
   const token = 'a'.repeat(48), expired = 'b'.repeat(48), banned = 'c'.repeat(48)
   const methods = { passwordLogin: true, registration: true, telegramLogin: true, miniAppLogin: true }
-  async function fixture({ role = 'member', authenticated = true, width = 390, remote = false } = {}) {
+  async function fixture({ role = 'member', authenticated = true, width = 390, remote = false, manageInvites = false, miniAppLogin = true, botUsername = 'anycord_test_bot', telegramFailure = false } = {}) {
     const context = await browser.newContext({ viewport: { width, height: 844 }, serviceWorkers: 'block' })
     const page = await context.newPage(), user = { ...member, role, avatarUrl: null }
-    const state = { authenticated, signedIn: 0, accepted: [], previews: [], joined: false, ownerReads: 0, logouts: 0 }
+    const state = { authenticated, signedIn: 0, accepted: [], previews: [], joined: false, ownerReads: 0, logouts: 0, created: [] }
     await page.addInitScript(remote => {
       delete Navigator.prototype.serviceWorker
       if (remote) {
@@ -19,7 +19,8 @@ export async function invitationSettingsChecks(browser, base, build, signed, lau
       }
     }, remote)
     await page.route('https://telegram.org/js/telegram-web-app.js', route => route.fulfill({ contentType: 'text/javascript', body: `
-      window.Telegram = { WebApp: { ready() {}, setHeaderColor() {}, setBackgroundColor() {} } };
+      window.telegramShares = [];
+      window.Telegram = { WebApp: { ready() {}, setHeaderColor() {}, setBackgroundColor() {}, openTelegramLink(url) { window.telegramShares.push(url) } } };
       document.documentElement.style.setProperty('--tg-safe-area-inset-top', '44px');
       document.documentElement.style.setProperty('--tg-content-safe-area-inset-top', '56px');
       document.documentElement.style.setProperty('--tg-safe-area-inset-bottom', '34px');
@@ -28,10 +29,20 @@ export async function invitationSettingsChecks(browser, base, build, signed, lau
       const request = route.request(), url = new URL(request.url()), path = url.pathname
       let body = {}, status = 200
       if (path === '/api/runtime') body = { apiVersion: 1, engine: 'cloudflare', auth: 'better-auth', realtime: 'websocket', build }
-      else if (path === '/api/auth/status') body = { initialized: true, user: state.authenticated ? user : null, methods }
+      else if (path === '/api/auth/status') body = { initialized: true, user: state.authenticated ? user : null, methods: { ...methods, miniAppLogin } }
       else if (path === '/api/auth/telegram/miniapp') {
         assert.equal(request.postDataJSON().initData, signed); state.signedIn++; state.authenticated = true
       } else if (path === '/api/account/telegram/profile') body = user
+      else if (path === '/api/account/telegram') {
+        if (telegramFailure) { status = 503; body = { message: 'Telegram settings unavailable' } }
+        else body = { linked: false, canUnlink: false, canSetPassword: false, botUsername, notificationsAvailable: false, messagingAllowed: false, browserLogin: false, miniAppLogin, enabled: false, preview: false, mutedChannelIds: [] }
+      }
+      else if (path === '/api/workspaces/main/invites') {
+        if (request.method() === 'POST') {
+          state.created.push({ origin: url.origin, authorization: request.headers().authorization })
+          body = { id: 'fixture-invite', token, expiresAt: Date.now() + 3600000, maxUses: 25, uses: 0, createdAt: Date.now() }
+        } else body = []
+      }
       else if (path === '/api/auth/logout') { state.authenticated = false; state.logouts++; body = { success: true } }
       else if (path === '/api/invitations/preview') {
         state.previews.push({ origin: url.origin, token: request.postDataJSON().token, authorization: request.headers().authorization })
@@ -43,13 +54,58 @@ export async function invitationSettingsChecks(browser, base, build, signed, lau
         else { state.joined = true; body = { workspaceId: 'private' } }
       } else if (path === '/api/bootstrap') {
         const workspaceId = url.searchParams.get('workspace') || 'main'
-        body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member', permissions: defaultPermissions }, ...(state.joined ? [{ id: 'private', name: 'Travel friends', initials: 'TF', role: 'member', permissions: defaultPermissions }] : [])], channels: [{ id: 'general', workspaceId, name: 'general', kind: 'text', topic: '', permissions: defaultPermissions }], members: [] }
+        body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member', permissions: manageInvites ? [...defaultPermissions, 'invites.manage'] : defaultPermissions }, ...(state.joined ? [{ id: 'private', name: 'Travel friends', initials: 'TF', role: 'member', permissions: defaultPermissions }] : [])], channels: [{ id: 'general', workspaceId, name: 'general', kind: 'text', topic: '', permissions: defaultPermissions }], members: [] }
       } else if (path.endsWith('/messages')) body = []
       else if (path === '/api/installation/authentication') { state.ownerReads++; body = methods }
       await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     })
     return { context, page, state }
   }
+
+  // Create/share from both web and Mini App, with destination-scoped bot lookup.
+  for (const scenario of [
+    { mini: true, width: 390 },
+    { width: 1280 },
+    { remote: true, botUsername: 'remote_anycord_bot' },
+    { miniAppLogin: false },
+    { botUsername: '' },
+    { telegramFailure: true },
+  ]) {
+    const { context, page, state } = await fixture({ ...scenario, manageInvites: true })
+    await page.goto(base + '/main/general' + (scenario.mini ? '#' + launch : ''), { waitUntil: 'networkidle' })
+    if (scenario.width !== 1280) await page.getByRole('button', { name: 'Open channels', exact: true }).click()
+    await page.locator('.server-heading').click()
+    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click()
+    await page.getByRole('button', { name: 'Invitations', exact: true }).click()
+    await page.getByRole('button', { name: 'Create invitation', exact: true }).click()
+    const origin = scenario.remote ? 'https://remote.example' : base
+    const web = origin + '/invite#token=' + token
+    const mini = !scenario.telegramFailure && scenario.miniAppLogin !== false && scenario.botUsername !== ''
+    const expected = mini ? `https://t.me/${scenario.botUsername || 'anycord_test_bot'}?startapp=invite_${token}` : web
+    await page.waitForFunction(expected => document.querySelector('input[aria-label="Invitation link"]')?.value === expected, expected)
+    const share = page.getByRole('link', { name: 'Share in Telegram', exact: true })
+    const shareURL = new URL(await share.getAttribute('href'))
+    assert.equal(shareURL.origin + shareURL.pathname, 'https://t.me/share/url')
+    assert.equal(shareURL.searchParams.get('url'), expected, 'sharing must preserve the full invitation capability')
+    assert.equal(shareURL.searchParams.get('text'), 'Join my server on Anycord')
+    assert.equal(await share.getAttribute('rel'), 'noopener noreferrer')
+    if (mini) assert.equal(await page.getByLabel('Web invitation link', { exact: true }).inputValue(), web)
+    else assert.equal(await page.getByLabel('Web invitation link', { exact: true }).count(), 0)
+    if (scenario.mini) {
+      await share.click()
+      assert.deepEqual(await page.evaluate(() => window.telegramShares), [shareURL.href])
+      assert.equal(context.pages().length, 1, 'Mini App sharing uses the native Telegram bridge')
+    }
+    assert.deepEqual(state.created, [{ origin, authorization: scenario.remote ? 'Bearer fixture-remote-session' : undefined }])
+    assert.equal(state.ownerReads, 0, 'community invite managers do not need installation-owner settings')
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+    if (process.env.ANYCORD_UI_CAPTURE && scenario.mini) {
+      await mkdir('output/playwright', { recursive: true })
+      await page.screenshot({ path: 'output/playwright/telegram-invitation-390.png', fullPage: true })
+    }
+    await context.close()
+  }
+  console.log('PASS invitation creation/sharing: native Telegram chooser, web sharing, remote bot isolation and disabled/unavailable Telegram fallback')
 
   // Discoverable paste flow, no second login, explicit acceptance, refreshed picker.
   {

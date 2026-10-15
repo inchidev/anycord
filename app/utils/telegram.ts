@@ -3,7 +3,7 @@ import { safeNext } from '../../shared/navigation'
 import type { User } from '../../shared/contracts'
 
 export interface MiniAppSession { attempt?: Promise<void>; authenticated?: boolean; profileAttempt?: Promise<User | undefined> }
-declare global { interface Window { Telegram?: { WebApp?: { initData?: string; ready?: () => void; setHeaderColor?: (color: string) => void; setBackgroundColor?: (color: string) => void } }; TelegramWebviewProxy?: { postEvent: (event: string, data: string) => void } } }
+declare global { interface Window { Telegram?: { WebApp?: { initData?: string; ready?: () => void; openTelegramLink?: (url: string) => void; setHeaderColor?: (color: string) => void; setBackgroundColor?: (color: string) => void } }; TelegramWebviewProxy?: { postEvent: (event: string, data: string) => void } } }
 export function telegramInitData() {
   return window.Telegram?.WebApp?.initData || useNuxtApp().$telegramLaunchData || ''
 }
