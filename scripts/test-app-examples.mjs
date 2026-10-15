@@ -30,10 +30,10 @@ try {
     posts.push({ path: request.url, token: request.headers.authorization, body: JSON.parse(raw) })
     response.writeHead(201, { 'Content-Type': 'application/json' }); response.end('{}')
   }); await listen(ci)
-  const run = () => promisify(execFile)(process.execPath, ['examples/apps/ci-webhook.mjs'], { env: { ...process.env, ANYCORD_URL: `http://127.0.0.1:${ci.address().port}`, ANYCORD_APP_ID: 'synthetic-app-id', ANYCORD_APP_TOKEN: 'synthetic-token', ANYCORD_CHANNEL_ID: 'general', ANYCORD_DELIVERY_ID: 'stable-ci-run', CI_JOB_STATUS: 'success', GITHUB_REPOSITORY: 'example/repo' } })
+  const run = () => promisify(execFile)(process.execPath, ['examples/apps/ci-webhook.mjs'], { env: { ...process.env, ANYCORD_URL: `http://127.0.0.1:${ci.address().port}`, ANYCORD_APP_ID: 'synthetic-app-id', ANYCORD_APP_TOKEN: 'synthetic-token', ANYCORD_CHANNEL_ID: 'general', ANYCORD_DELIVERY_ID: 'stable-ci-run', CI_JOB_STATUS: 'success', GITHUB_REPOSITORY: 'example/repo', GITHUB_SHA: '0123456789abcdef' } })
   await run(); await run()
   assert.equal(posts.length, 2); assert.deepEqual(posts[0], posts[1], 'CI retries use the same UUID and payload')
-  assert.equal(posts[0].path, '/api/apps/synthetic-app-id/messages'); assert.equal(posts[0].token, 'Bearer synthetic-token'); assert.equal(posts[0].body.text, 'example/repo: build success')
+  assert.equal(posts[0].path, '/api/apps/synthetic-app-id/messages'); assert.equal(posts[0].token, 'Bearer synthetic-token'); assert.equal(posts[0].body.text, 'example/repo: build success (0123456)')
   assert.match(posts[0].body.id, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/)
   console.log('PASS: runnable CI webhook, stable retry UUID, receiver signature/expiry/ID checks, durable deduplication and saved responses across restart')
 } finally { await close(server); if (ci) await close(ci); await rm(dir, { recursive: true, force: true }) }
