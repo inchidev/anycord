@@ -100,6 +100,10 @@ try {
     await page.getByText('This command is unavailable in this channel', { exact: false }).waitFor()
     assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), '/does-not-exist', 'Failed command retains its draft')
     await page.screenshot({ path: `output/playwright/commands-${width}.png` })
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('')
+    apps[0].name = 'App changed in another client'
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('/')
+    await page.getByRole('button', { name: '/ping · App changed in another client', exact: true }).waitFor()
     if (width === 390) await page.getByRole('button', { name: 'Open channels', exact: true }).click()
     await page.locator('.server-heading').click()
     await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click()

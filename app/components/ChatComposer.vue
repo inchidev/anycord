@@ -130,7 +130,10 @@ async function insertText(text: string) {
 }
 function quote(message: Message) { return insertText(quoteMessage(message.author, message.text)) }
 const notifyTyping = useThrottleFn(() => { if (draft.value.trim()) emit('typing', { type: 'typing', channelId: props.channelId, ...(props.threadId ? { threadId: props.threadId } : {}) }) }, 1800)
-watch(draft, () => notifyTyping())
+watch(draft, (value, previous) => {
+  notifyTyping()
+  if (value.startsWith('/') && !previous.startsWith('/') && !props.threadId) void commandRegistry.refetch()
+})
 watch(key, () => { send.reset(); commandFeedback.value = ''; commandFailure.value = ''; pendingInvocation.value = null })
 function clearReply() {
   const state = drafts.value[key.value]
