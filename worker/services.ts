@@ -1,3 +1,4 @@
+import { requireOutbound } from './maintenance'
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { huddles, huddleParticipants } from '../db/schema'
@@ -12,6 +13,7 @@ export async function integrationStatus(env: Env): Promise<Integrations> {
   return { realtimeListenerPreset: listenerPreset, realtimeConfigured: !!(token && accountId && appId && preset), realtimeAccountId: accountId, realtimeAppId: appId, realtimePreset: preset || 'group_call_participant', aiConfigured: !!ai, aiModel: model || 'openai/gpt-4.1-mini', email: 'later' }
 }
 export async function realtimeRequest(env: Env, path: string, method = 'GET', body?: unknown) {
+  await requireOutbound(env)
   const config = await integrationStatus(env)
   if (!config.realtimeConfigured) throw new HttpError(409, 'Ask the installation owner to configure Cloudflare RealtimeKit in Installation Settings → Integrations')
   const key = await decrypt(await getSetting(env, 'realtimeToken'), env.APP_SECRET)
@@ -57,6 +59,7 @@ export async function leaveHuddle(env: Env, channelId: string, participantId: st
   await db.delete(huddleParticipants).where(eq(huddleParticipants.id, row.id)).run()
 }
 export async function askAI(env: Env, channelId: string, userId: string) {
+  await requireOutbound(env)
   const encrypted = await getSetting(env, 'openrouterKey')
   if (!encrypted) throw new HttpError(409, 'Ask the installation owner to configure OpenRouter in Installation Settings → Integrations')
   const history = await getMessages(env, channelId, userId)
@@ -74,6 +77,7 @@ export async function askAI(env: Env, channelId: string, userId: string) {
 }
 
 export async function testAI(env: Env) {
+  await requireOutbound(env)
   const encrypted = await getSetting(env, 'openrouterKey')
   if (!encrypted) throw new HttpError(409, 'Save an OpenRouter API key before testing the connection')
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {

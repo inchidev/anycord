@@ -1,5 +1,6 @@
 import { slackWebhookInputSchema, slackWebhookSchema, slackWebhookCredentialSchema, slackMessageSchema, appPolicySchema, appConfigSchema, appSchema, appCredentialSchema, webhookMessageSchema, commandInvokeSchema, commandResultSchema, commandRegistrySchema, appAuditSchema, appDeliverySchema } from './apps'
 import { z } from 'zod'
+import { operationsStatusSchema, backupPolicySchema, jobRequestSchema, jobSchema, releaseSchema } from './operations'
 import { permissionsResultSchema, roleInputSchema, roleResultSchema, memberRolesInputSchema, overridesInputSchema, auditEventSchema } from './contracts'
 import { passwordProofSchema, recoveryResetSchema, inviteInputSchema, inviteTokenSchema, inviteResultSchema } from './contracts'
 import { authenticationInputSchema, telegramIntegrationInputSchema, telegramIntegrationStatusSchema, telegramPreferencesInputSchema, telegramAccountStatusSchema } from './contracts'
@@ -30,6 +31,12 @@ function endpoint(method: string, path: string, body: z.ZodType, response: z.Zod
 // The public wire contract, independent of D1, Durable Objects and backend SDKs.
 // Operational migration routes and Better Auth's native endpoints are not public app endpoints.
 export const endpoints = {
+  operations: endpoint('GET', '/api/installation/operations', none, operationsStatusSchema),
+  operationCreate: endpoint('POST', '/api/installation/operations', jobRequestSchema, jobSchema),
+  operationCancel: endpoint('DELETE', '/api/installation/operations/:jobId', none, ok),
+  backupPolicyUpdate: endpoint('PUT', '/api/installation/backup-policy', backupPolicySchema, backupPolicySchema),
+  installationRelease: endpoint('GET', '/api/installation/release', none, releaseSchema),
+  restoredIntegrations: endpoint('POST', '/api/installation/restored-integrations', z.object({ enable: z.literal(true) }), ok),
   slackWebhooks: endpoint('GET', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks', none, z.array(slackWebhookSchema)),
   slackWebhookCreate: endpoint('POST', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks', slackWebhookInputSchema, slackWebhookCredentialSchema),
   slackWebhookRotate: endpoint('POST', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks/:webhookId/rotate', none, slackWebhookCredentialSchema),

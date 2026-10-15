@@ -8,8 +8,9 @@ try { secret = await readFile('.celld/app-secret', 'utf8') } catch {
   secret = randomBytes(32).toString('hex')
   await writeFile('.celld/app-secret', secret, { mode: 0o600 })
 }
-const migrationToken = randomBytes(32).toString('hex')
-await writeFile('.celld/migration-token', migrationToken, { mode: 0o600 })
+let migrationToken
+try { migrationToken = (await readFile('.celld/migration-token', 'utf8')).trim() } catch {}
+if (!migrationToken) { migrationToken = randomBytes(32).toString('hex'); await writeFile('.celld/migration-token', migrationToken, { mode: 0o600 }) }
 await writeFile('.dev.vars', `APP_SECRET=${secret}\nMIGRATION_TOKEN=${migrationToken}\nAUTH_BASE_URL=${process.env.AUTH_BASE_URL || 'http://127.0.0.1:9876'}\n`, { mode: 0o600 })
 let storageVars = ''
 for (const key of ['STORAGE_ENDPOINT', 'STORAGE_BUCKET', 'STORAGE_REGION', 'STORAGE_ACCESS_KEY_ID', 'STORAGE_SECRET_ACCESS_KEY']) if (process.env[key]) storageVars += `${key}=${JSON.stringify(process.env[key])}\n`

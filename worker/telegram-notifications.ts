@@ -113,7 +113,7 @@ export async function flushTelegramNotifications(env: Env) {
         // Re-read global enablement immediately before using a cached credential.
         const active = await authenticationConfig(env)
         if (!active.notifications || active.botToken !== config.botToken) status = 'skipped'
-        else await botRequest(config, 'sendMessage', { chat_id: delivery.chatId,
+        else await botRequest(env, config, 'sendMessage', { chat_id: delivery.chatId,
           text: `New activity in #${delivery.channel}${delivery.preview ? `\n${delivery.text.slice(0, 500)}` : ''}\n${link.href}`,
           link_preview_options: { is_disabled: true } })
       }
@@ -132,5 +132,5 @@ export async function testTelegramNotification(env: Env, userId: string) {
   if (!status.linked || !status.enabled || !status.messagingAllowed || !status.notificationsAvailable) throw new HttpError(409, 'Enable Telegram notifications and start the bot before sending a test')
   const account = await database(env).select().from(authAccounts).where(and(eq(authAccounts.userId, userId), eq(authAccounts.providerId, 'telegram'))).get()
   if (!account) throw new HttpError(409, 'Link Telegram first')
-  await botRequest(await authenticationConfig(env), 'sendMessage', { chat_id: account.accountId, text: 'Telegram notifications are connected to your Anycord account.' })
+  await botRequest(env, await authenticationConfig(env), 'sendMessage', { chat_id: account.accountId, text: 'Telegram notifications are connected to your Anycord account.' })
 }

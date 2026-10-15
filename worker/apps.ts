@@ -1,3 +1,4 @@
+import { maintenanceActive, requireOutbound } from './maintenance'
 import { requirePermission } from './permissions'
 import { and, eq, desc, isNull } from 'drizzle-orm'
 import { z } from 'zod'
@@ -35,6 +36,8 @@ async function findApp(env: Env, id: string, workspaceId?: string) {
   return app
 }
 async function grant(env: Env, app: AppRow, channelId: string): Promise<Grant> {
+  if (await maintenanceActive(env)) throw new HttpError(503, 'Installation maintenance is in progress')
+  try { await requireOutbound(env) } catch (error) { if (error instanceof HttpError && error.status === 409) throw new HttpError(403, error.message); throw error }
   const policy = await getSetting(env, 'appsPolicy')
   if (!app.enabled || !permitted(app, await appPolicy(env))) throw new HttpError(403, 'This app is disabled by its owner or installation policy')
   const channel = await database(env).query.channels.findFirst({ where: (c, { eq }) => eq(c.id, channelId) })
@@ -214,6 +217,8 @@ export async function signAppEvent(secret: string, timestamp: string, body: stri
   return [...new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(`${timestamp}.${body}`)))].map(v => v.toString(16).padStart(2, '0')).join('')
 }
 export async function flushAppEvents(env: Env) {
+  if (await maintenanceActive(env)) return
+  try { await requireOutbound(env) } catch (error) { if (error instanceof HttpError && error.status === 409) return; throw error }
   const now = Date.now()
   // Expired leases are reclaimable. Receivers must deduplicate by stable event ID.
   const due = await env.DB.prepare("SELECT id FROM app_outbox WHERE status IN ('pending', 'sending') AND due_at <= ? ORDER BY due_at LIMIT 10").bind(now).all<{ id: string }>()
@@ -330,6 +335,7 @@ export async function incomingSlackWebhook(env: Env, request: Request) {
     if (error instanceof HttpError) {
       if (error.status === 403) return slackResponse('action_prohibited', 403)
       if (error.status === 404) return slackResponse('invalid_token', 404)
+      if (error.status === 503) return slackResponse('maintenance', 503)
       if (error.status === 409) return slackResponse('idempotency_conflict', 409)
       return slackResponse('invalid_payload', error.status)
     }

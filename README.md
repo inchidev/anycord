@@ -48,6 +48,8 @@ Install Anycord from the landing or server-picker page. The PWA provides an offl
 
 Changes arrive through PRs to main. Published versions are immutable and production promotion is explicit; independent installations choose their own updates. See [contributing](CONTRIBUTING.md) and [release procedures](docs/releases.md).
 
+Installation Settings → Backups & updates manages the whole installation, including every community. Connect the trusted [operations runner](docs/operations.md) to store verified backups outside the deployment and apply an explicitly chosen compatible release. Restore always uses a separate empty destination. Recovery copies contain sensitive account data and keys; use protected, encrypted storage.
+
 ## Development
 
 ```sh

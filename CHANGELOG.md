@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add installation-owner backup policy/status and a trusted operator runner for whole-installation D1/auth data, committed R2/S3 files and protected recovery keys (#4).
+- Verify portable recovery points before restore into a separate empty installation; preserve accounts/communities/threads/files, revoke sessions and disable external integrations until owner review.
+- Add explicit immutable-release updates with a verified pre-update checkpoint, serialized/fenced jobs, maintenance, authenticated migrations, resource/key preservation, progress and explicit interruption recovery (#5).
+- Package the runner and operations guide for Cloudflare and celld. Existing installations bootstrap migration `0011_fancy_vanisher` with a manual published-package upgrade once; subsequent compatible releases can be selected in Settings. No deployment or automatic update occurs on merge.
+
 ## 0.4.1 — 2026-10-15
 
 - Join a community inside Telegram Mini App from the server picker or community menu: paste an invitation, review the community, installation and account, then explicitly accept with the current session (#22).

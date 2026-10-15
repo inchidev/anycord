@@ -78,6 +78,13 @@
       "when": 1792049739326,
       "tag": "0010_cute_blob",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792049739327,
+      "tag": "0011_fancy_vanisher",
+      "breakpoints": true
     }
   ]
 }

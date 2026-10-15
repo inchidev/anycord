@@ -2,6 +2,9 @@ import { handleAppManagement, incomingSlackWebhook, incomingAppMessage, commandR
 import { requirePermission, serverAccess, initializeRoles, permissionsView, type PermissionMutation } from './permissions'
 import { roleInputSchema, memberRolesInputSchema, overridesInputSchema } from '../shared/contracts'
 import { z, ZodError } from 'zod'
+import { operatorRoute, operationsStatus, queueOperation, cancelOperation, updateBackupPolicy, migrationWriter } from './installation-operations'
+import { maintenanceActive } from './maintenance'
+import { publishedRelease } from './releases'
 import { inviteTokenSchema, inviteInputSchema, recoveryResetSchema, passwordProofSchema } from '../shared/contracts'
 import { generateRecoveryKeys, resetWithRecoveryKey, randomToken, previewInvite, acceptInvite } from './access'
 import { and, eq, sql, desc, inArray } from 'drizzle-orm'
@@ -43,13 +46,17 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
   }
   if (path.startsWith('/api/compat/slack/services/')) return incomingSlackWebhook(env, request)
   const endpoint = matchEndpoint(method, path)
+  if (path.startsWith('/api/_operations/')) return operatorRoute(request, env, engine)
   if (endpoint?.name === 'runtime') return json({ apiVersion: API_VERSION, engine, auth: 'better-auth', realtime: 'websocket', build: buildInfo })
   if (path === '/api/_runtime') return json({ ok: true })
+  if (path.startsWith('/api/compat/slack/services/')) return incomingSlackWebhook(env, request)
+  if (!['/api/health', '/api/auth/status', '/api/_migrate'].includes(path) && !path.startsWith('/api/installation/operations') && await maintenanceActive(env)) throw new HttpError(503, 'Installation maintenance is in progress. Your draft is kept; try again when it finishes.')
   if (path === '/api/_migrate' && method === 'POST') {
     if (!env.MIGRATION_TOKEN || !await equalSecret(request.headers.get('X-Migration-Token') || '', env.MIGRATION_TOKEN)) throw new HttpError(403, 'Migration access denied')
     const input = z.object({ target: z.string().optional(), legacy: z.array(z.object({ id: z.string(), name: z.string(), text: z.string(), sentAt: z.number() })).max(100).optional() }).parse(await readBody(request, 1_000_000))
-    const result = await applyMigrations(env.DB, input.target)
-    await seedDatabase(env.DB, input.legacy)
+    const write = await maintenanceActive(env) ? await migrationWriter(env) : undefined
+    const result = await applyMigrations(env.DB, input.target, write)
+    await seedDatabase(env.DB, input.legacy, write)
     return json({ ...result, messageCount: (await env.DB.prepare('SELECT COUNT(*) AS n FROM messages').first<{ n: number }>())?.n })
   }
   if (path === '/api/_maintenance' && method === 'POST') {
@@ -181,6 +188,17 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
   }
   if (endpoint?.name === 'appPost') return incomingAppMessage(env, endpoint.params.appId!, request)
   const user = await requireUser(request, env)
+  if (endpoint && ['operations','operationCreate','operationCancel','backupPolicyUpdate','installationRelease','restoredIntegrations'].includes(endpoint.name)) {
+    if (user.role !== 'owner') throw new HttpError(403, 'Only the installation owner can manage backups and updates')
+    if (endpoint.name === 'operations') return json(await operationsStatus(env, engine))
+    if (endpoint.name === 'operationCreate') return json(await queueOperation(env, engine, user.id, await readBody(request)))
+    if (endpoint.name === 'operationCancel') return json(await cancelOperation(env, endpoint.params.jobId!))
+    if (endpoint.name === 'backupPolicyUpdate') return json(await updateBackupPolicy(env, await readBody(request)))
+    if (endpoint.name === 'installationRelease') return json(await publishedRelease(engine))
+    z.object({ enable: z.literal(true) }).parse(await readBody(request))
+    await env.DB.batch([env.DB.prepare('UPDATE installation_state SET outbound_disabled=0 WHERE id=1'), env.DB.prepare("DELETE FROM settings WHERE key='restored_outbound_disabled'")])
+    return json({ ok: true })
+  }
   if (!['GET', 'HEAD'].includes(method) && !await hub(env, '_auth').consumeRate(`writes:${user.id}`, 90)) throw new HttpError(429, 'You are sending too quickly. Try again in a minute.')
   if (endpoint) {
     const appResponse = await handleAppManagement(env, user, endpoint.name, endpoint.params, request)
@@ -570,6 +588,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
 export function createD1Handler(engine: 'celld' | 'cloudflare') {
 return {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (await maintenanceActive(env)) return
     if (event.cron !== '* * * * *') ctx.waitUntil(cleanupAttachments(env))
     ctx.waitUntil(flushTelegramNotifications(env))
     ctx.waitUntil(flushAppEvents(env))
@@ -604,6 +623,7 @@ return {
       if (new URL(request.url).pathname.startsWith('/api/')) headers.set('Cache-Control', 'no-store')
       return new Response(response.body, { status: response.status, headers })
     } catch (error) {
+      if (error instanceof Error && error.message.includes('Anycord maintenance: writes are paused')) return json({ message: 'Installation maintenance is in progress. Your draft is kept.' }, 503, cors)
       if (error instanceof ZodError) return json({ message: error.issues[0]?.message || 'Invalid input' }, 400, cors)
       if (error instanceof URIError) return json({ message: 'Invalid path encoding' }, 400, cors)
       if (error instanceof HttpError) return json({ message: error.message }, error.status, { ...cors, ...(error.status === 429 ? { 'Retry-After': '60' } : {}) })

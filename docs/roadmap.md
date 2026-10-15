@@ -8,6 +8,7 @@
 - Eight recovery keys, generated after verifying the current password. Only hashes are stored. A successful reset preserves the account and memberships, changes the password, revokes all prior sessions and invalidates the entire old key set. Generate a fresh set after signing in again.
 - Server owners can remove members, ban them from joining again and remove bans. The server owner cannot be removed. Existing realtime connections and active huddle participants are disconnected during removal.
 - Installation Settings belongs to the installation owner: RealtimeKit/OpenRouter credentials, file storage and database details. Server Settings belongs to each community: identity, channels, invitations and members.
+- Whole-installation backup/restore and explicit release updates use a trusted operator runner, external recovery storage and a maintenance window. See [operations](operations.md) for setup, protection, compatibility, interruption recovery and validation limits.
 - Voice huddles use the installation's configured RealtimeKit app and participant preset. The huddle includes microphone selection, output selection where supported by the browser, and mute/unmute. Provider tests use a local double; two-device live audio still needs actual credentials and browser permission checks.
 
 ## Roles and channel permissions
@@ -18,7 +19,7 @@ See [roles and permissions](permissions.md) for precedence, extension points, mi
 
 ## Decisions still open
 
-- Installation administration beyond service settings: registration policy, account administration, installation name, operational status and backup/export tooling.
+- Further installation administration: account administration, installation name and per-community export/import. Authentication policy and whole-installation backup/status/update operations are implemented.
 - Shared login across independent installations, federation and background notifications from multiple connections. An installation admin panel alone does not implement these capabilities. Keep identities and credentials independent until a protocol and trust model are chosen.
 - Stronger shared-D1 tenant isolation and a possible control database plus per-server databases: [issue #1](https://github.com/inchidev/anycord/issues/1).
 

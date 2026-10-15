@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { releaseManifestSchema } from '../runtime/operations-contracts.mjs'
 const info = JSON.parse(await readFile('shared/build-info.json', 'utf8'))
 assert(/^[0-9a-f]{40}$/.test(info.commit), 'Release requires a source commit')
 assert(/^\d+\.\d+\.\d+$/.test(info.version), 'Release requires a stable version')
@@ -19,6 +20,8 @@ try {
       ['.output/public', '.output/public'], ['drizzle', 'drizzle'],
       ['shared/build-info.json', 'version.json'], ['DEPLOYMENT.md', 'DEPLOYMENT.md'],
       ['docs/releases.md', 'RELEASES.md'], ['CHANGELOG.md', 'CHANGELOG.md'],
+      ['docs/operations.md', 'OPERATIONS.md'], ['operations', 'operations'],
+      ['runtime/operations-contracts.mjs', 'operations/contracts.mjs'],
     ]) await cp(from, join(dir, to), { recursive: true })
     const config = JSON.parse(await readFile(engine === 'cloudflare' ? 'wrangler.cloudflare.jsonc' : 'wrangler.jsonc', 'utf8'))
     config.main = 'worker.js'; config.no_bundle = true
@@ -44,7 +47,8 @@ try {
     const bytes = await readFile(join('release', name))
     artifacts.push({ name, engine, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length })
   }
-  const manifest = { format: 1, ...info, engines: ['cloudflare', 'celld'], artifacts }
+  const compatibility = JSON.parse(await readFile('release-upgrade.json', 'utf8'))
+  const manifest = releaseManifestSchema.parse({ format: 1, ...info, upgrade: compatibility, engines: ['cloudflare', 'celld'], artifacts })
   await writeFile('release/anycord-release.json', JSON.stringify(manifest, null, 2) + '\n')
   const files = [...artifacts.map(x => x.name), 'anycord-release.json']
   const sums = await Promise.all(files.map(async name => `${createHash('sha256').update(await readFile(join('release', name))).digest('hex')}  ${name}`))
