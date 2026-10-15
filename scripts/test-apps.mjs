@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { slackWebhookChecks } from './test-slack-webhooks.mjs'
 import { build } from 'esbuild'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -164,6 +165,7 @@ try {
     const activities = await request('/api/workspaces/main/apps-audit', { who: owner })
     for (const action of ['app.installed', 'credentials.rotated', 'app.disabled', 'app.uninstalled', 'message.posted', 'delivery.failed']) assert(activities.some(a => a.action === action), action)
     assert(!JSON.stringify(activities).includes(rotated.token))
+    await slackWebhookChecks({ mf, db, base, request, owner, member, cfg, other, otherChannel, engine })
     console.log(`PASS ${engine}: app policy, channel/server isolation, bot identity, scoped credentials, concurrent deduplication, revocation, command validation/results, signatures, leased retries, receiver idempotency, recursion prevention, rate limits and audit`)
     await mf.dispose(); mf = null
   }

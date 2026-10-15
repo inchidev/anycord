@@ -78,3 +78,15 @@ export function parseSlashCommand(text: string, registry: z.infer<typeof command
   try { validateCommandArguments(command, args) } catch { throw new CommandInputError('Check the required arguments and types shown in the command list') }
   return { appId: command.appId, name: command.name, arguments: args }
 }
+
+export const slackWebhookInputSchema = z.object({ channelId: idSchema }).strict()
+export const slackWebhookSchema = slackWebhookInputSchema.extend({ id: z.uuid(), createdAt: z.number().int() })
+export const slackWebhookCredentialSchema = slackWebhookSchema.extend({ url: z.url() })
+// Modern Slack webhooks bind channel/name/avatar at installation. Legacy sender
+// overrides are accepted for interoperability but never grant authority.
+export const slackMessageSchema = z.object({
+  text: z.string().min(1).max(4000).refine(value => !!value.trim(), 'Write message text'),
+  channel: z.string().max(128).optional(), username: z.string().max(128).optional(),
+  icon_url: z.string().max(2048).optional(), icon_emoji: z.string().max(128).optional(),
+  mrkdwn: z.boolean().optional(), unfurl_links: z.boolean().optional(), unfurl_media: z.boolean().optional(),
+}).strict()

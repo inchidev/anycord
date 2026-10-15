@@ -1,4 +1,4 @@
-import { handleAppManagement, incomingAppMessage, commandRegistry, invokeCommand, invocationResult, flushAppEvents } from './apps'
+import { handleAppManagement, incomingSlackWebhook, incomingAppMessage, commandRegistry, invokeCommand, invocationResult, flushAppEvents } from './apps'
 import { z, ZodError } from 'zod'
 import { inviteTokenSchema, inviteInputSchema, recoveryResetSchema, passwordProofSchema } from '../shared/contracts'
 import { generateRecoveryKeys, resetWithRecoveryKey, randomToken, requireServerOwner, previewInvite, acceptInvite } from './access'
@@ -39,6 +39,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     if (engine === 'celld' && response.status === 404 && !path.split('/').filter(Boolean).at(-1)?.includes('.')) return env.ASSETS.fetch(new Request(new URL('/', request.url), request))
     return response
   }
+  if (path.startsWith('/api/compat/slack/services/')) return incomingSlackWebhook(env, request)
   const endpoint = matchEndpoint(method, path)
   if (endpoint?.name === 'runtime') return json({ apiVersion: API_VERSION, engine, auth: 'better-auth', realtime: 'websocket', build: buildInfo })
   if (path === '/api/_runtime') return json({ ok: true })
@@ -536,7 +537,7 @@ return {
       try { const parsed = new URL(origin); if (parsed.origin !== origin || (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)))) return json({ message: 'Invalid remote origin' }, 403) } catch { return json({ message: 'Invalid origin' }, 403) }
       Object.assign(cors, { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' })
     }
-    if (request.method === 'OPTIONS' && new URL(request.url).pathname.startsWith('/api/')) return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } })
+    if (request.method === 'OPTIONS' && new URL(request.url).pathname.startsWith('/api/')) return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key', 'Access-Control-Max-Age': '600' } })
     try {
       const response = await route(request, env, engine, ctx)
       if (response.status === 101) return response

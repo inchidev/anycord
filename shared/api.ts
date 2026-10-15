@@ -1,4 +1,4 @@
-import { appPolicySchema, appConfigSchema, appSchema, appCredentialSchema, webhookMessageSchema, commandInvokeSchema, commandResultSchema, commandRegistrySchema, appAuditSchema, appDeliverySchema } from './apps'
+import { slackWebhookInputSchema, slackWebhookSchema, slackWebhookCredentialSchema, slackMessageSchema, appPolicySchema, appConfigSchema, appSchema, appCredentialSchema, webhookMessageSchema, commandInvokeSchema, commandResultSchema, commandRegistrySchema, appAuditSchema, appDeliverySchema } from './apps'
 import { z } from 'zod'
 import { passwordProofSchema, recoveryResetSchema, inviteInputSchema, inviteTokenSchema, inviteResultSchema } from './contracts'
 import { authenticationInputSchema, telegramIntegrationInputSchema, telegramIntegrationStatusSchema, telegramPreferencesInputSchema, telegramAccountStatusSchema } from './contracts'
@@ -29,6 +29,11 @@ function endpoint(method: string, path: string, body: z.ZodType, response: z.Zod
 // The public wire contract, independent of D1, Durable Objects and backend SDKs.
 // Operational migration routes and Better Auth's native endpoints are not public app endpoints.
 export const endpoints = {
+  slackWebhooks: endpoint('GET', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks', none, z.array(slackWebhookSchema)),
+  slackWebhookCreate: endpoint('POST', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks', slackWebhookInputSchema, slackWebhookCredentialSchema),
+  slackWebhookRotate: endpoint('POST', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks/:webhookId/rotate', none, slackWebhookCredentialSchema),
+  slackWebhookRevoke: endpoint('DELETE', '/api/workspaces/:workspaceId/apps/:appId/slack-webhooks/:webhookId', none, ok),
+  slackWebhookPost: endpoint('POST', '/api/compat/slack/services/:workspaceId/:webhookId/:token', slackMessageSchema, z.literal('ok')),
   appPolicy: endpoint('GET', '/api/installation/apps', none, appPolicySchema),
   appPolicyUpdate: endpoint('PUT', '/api/installation/apps', appPolicySchema, appPolicySchema),
   serverApps: endpoint('GET', '/api/workspaces/:workspaceId/apps', none, z.object({ apps: z.array(appSchema), policy: appPolicySchema })),

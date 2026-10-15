@@ -115,3 +115,36 @@ Requests and dispatch re-check the current policy, app status, server/channel gr
 Limits: 20 installed apps per server, 50 granted channels per app, 30 incoming requests per app per minute, 15 command invocations per member/server per minute, plus existing human write limits. A `429` response includes `Retry-After: 60`; duplicate incoming attempts count toward limits. Audit records cover installs/configuration/disabling/uninstall, rotation, policy changes, accepted posts and failed/cancelled deliveries, with IDs and timestamps and no secrets or message contents. The UI returns the latest 100 records/deliveries, shows 12, and a scheduled sweep retains terminal deliveries for seven days and audit records for 30 days. Message receipts and invocation IDs remain durable for idempotency.
 
 API details live in `shared/apps.ts` and `shared/api.ts`. Validate locally with `npm run test:apps` and `npm run verify`. Tests run both actual Worker entrypoints with disposable D1/DO state, without provisioning Cloudflare resources.
+
+## Slack-compatible incoming webhooks
+
+Anycord supports the **plain-text incoming webhook subset** of Slack's protocol. An existing sender using a configurable Slack webhook URL can post `{"text":"Build passed"}` and receive HTTP `200`, `text/plain`, `ok`. The official `@slack/webhook` Node SDK is exercised against both Worker entrypoints in the tests. This is independent of Slack's service and does not require a Slack account.
+
+In Server Settings → Apps & integrations, install/configure an app and grant its channels. In the app's **Slack incoming webhooks** section, choose a channel and create a URL. There is one URL per app/channel. Copy the secret URL immediately; listing webhooks returns metadata only. Rotation replaces its secret; revocation deletes its access. Disabling the app or installation policy blocks it while disabled. Removing its channel grant permanently revokes the URL, including if the channel is later granted again. Rotating the app's general credentials or uninstalling the app also revokes all its Slack URLs.
+
+```sh
+curl --fail-with-body "$SLACK_WEBHOOK_URL" \
+  -H 'Content-Type: application/json' \
+  --data '{"text":"Build passed"}'
+```
+
+Or reuse an ordinary SDK sender:
+
+```js
+import { IncomingWebhook } from '@slack/webhook'
+await new IncomingWebhook(process.env.SLACK_WEBHOOK_URL).send({ text: 'Build passed' })
+```
+
+The runnable [Slack SDK example](../examples/apps/slack-webhook.mjs) reads `SLACK_WEBHOOK_URL` and optionally `CI_JOB_STATUS`/`GITHUB_REPOSITORY`. `@slack/webhook` is a development/test dependency, not part of Anycord's runtime bundle.
+
+The webhook URL is a capability restricted to **one channel and its app identity**. It needs no Authorization header and never uses a human session. Legacy `channel`, `username`, `icon_url` and `icon_emoji` fields are accepted but ignored; they cannot override the configured destination or identity. `mrkdwn`, `unfurl_links` and `unfurl_media` flags are accepted for sender interoperability; messages render as Anycord text without rich Slack formatting, unfurling or mass-mention expansion. Text is required and limited to 4,000 characters; JSON bodies are limited to 20,000 bytes.
+
+`blocks`, `attachments`, `thread_ts` and `metadata` explicitly return HTTP `400`/`unsupported_payload`, even when fallback text exists. Other unknown fields and malformed JSON return `invalid_payload`. Missing/blank text returns `no_text`. This milestone does not implement Block Kit, files, thread targeting, OAuth, Slack Web API methods, Events API, Slack-format slash commands, Workflow Builder or Marketplace installation.
+
+Ordinary requests create separate messages, including identical repeated text. For safe retries, Anycord additionally accepts an **optional** `Idempotency-Key` header (1–128 ASCII letters/digits or `._:-`). This is an Anycord extension, not a Slack requirement. Reuse the same key and text on the same webhook to converge on one durable message, including concurrent requests. Changed text or a deleted original message returns HTTP `409`/`idempotency_conflict`. Keys are scoped by webhook ID and survive rotation of that webhook's secret; newly created webhooks have independent keys. A webhook URL itself cannot retrieve message history or reaction/thread metadata.
+
+Errors are plain text: `invalid_token` (`404`, including revoked URLs), `action_prohibited` (`403`, including disabled policy/app or changed grants), `invalid_payload` (`400`, or `413`/`415` for body/type limits), `no_text`/`unsupported_payload` (`400`), `idempotency_conflict` (`409`), `rate_limited` (`429`, with `Retry-After: 60`), `method_not_allowed` (`405`) and `internal_error` (`500`). All URL and bearer credentials of an app share the 30 requests/minute app budget, preventing additional URLs from bypassing its limit.
+
+Treat the entire webhook URL as a secret. Anycord stores only the secret's hash, never lists it again, never redirects incoming posts, and omits capability URLs/payloads from application errors/logs. Configure reverse-proxy/platform access logs to redact these secret URL paths too. Audit events record `slack_webhook.created`, `.rotated` and `.revoked` without secrets. Slack bot posts do not produce outbound app events or Telegram alerts.
+
+The reference protocol is documented in [Slack's incoming webhook guide](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/); supported differences and limits are listed above.

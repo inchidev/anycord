@@ -6,7 +6,7 @@ A familiar chat client for independent communities. Run an installation on Cloud
 - Private image/file attachments using native R2 or configurable S3-compatible storage.
 - Multiple communities on one installation, with membership checked for every server, channel, message, search and file request.
 - Independent remote connections, accounts and drafts.
-- Server-scoped apps, incoming webhooks, bot identities and slash commands with revocable credentials and signed events. See [apps and examples](docs/apps.md).
+- Server-scoped apps, Slack-compatible plain-text incoming webhooks, bot identities and slash commands with revocable credentials and signed events. See [apps and examples](docs/apps.md).
 - Optional Cloudflare RealtimeKit huddles and OpenRouter assistant integration.
 - Optional Telegram OIDC and Mini App login, account linking and opt-in bot notifications. See [authentication setup](docs/authentication.md).
 

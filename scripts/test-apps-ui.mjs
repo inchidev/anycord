@@ -19,7 +19,7 @@ const base = `http://127.0.0.1:${server.address().port}`, browser = await chromi
 try {
   for (const width of [1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: 'block' }), page = await context.newPage()
-    const user = { id: 'owner', name: 'Owner', role: 'owner', color: '#5865f2' }, errors = [], apps = [], posts = []
+    const user = { id: 'owner', name: 'Owner', role: 'owner', color: '#5865f2' }, errors = [], apps = [], posts = [], hooks = []
     let failNext = false
     let policy = { enabled: true, allowedOrigins: [] }
     page.on('pageerror', error => errors.push(error.message))
@@ -40,7 +40,12 @@ try {
           const input = request.postDataJSON(), app = { ...input, id: crypto.randomUUID(), workspaceId: 'main', createdAt: Date.now(), status: 'active', permissions: ['Post messages in authorized channels'] }
           apps.push(app); status = 201; body = { app, token: 'synthetic-app-token', signingSecret: 'synthetic-signing-secret' }
         } else body = { apps, policy }
-      } else if (/\/apps\/[^/]+\/rotate$/.test(path)) body = { app: apps[0], token: 'synthetic-rotated-token', signingSecret: 'synthetic-rotated-secret' }
+      } else if (path.endsWith('/slack-webhooks')) {
+        if (method === 'GET') body = hooks.map(({ url, ...metadata }) => metadata)
+        else { const hook = { id: crypto.randomUUID(), channelId: request.postDataJSON().channelId, createdAt: Date.now(), url: `${base}/api/compat/slack/services/main/synthetic-id/synthetic-secret` }; hooks.push(hook); body = hook; status = 201 }
+      } else if (/\/slack-webhooks\/[^/]+\/rotate$/.test(path)) { hooks[0].url = `${base}/api/compat/slack/services/main/synthetic-id/rotated-secret`; body = hooks[0] }
+      else if (/\/slack-webhooks\/[^/]+$/.test(path)) { hooks.length = 0; body = { ok: true } }
+      else if (/\/apps\/[^/]+\/rotate$/.test(path)) body = { app: apps[0], token: 'synthetic-rotated-token', signingSecret: 'synthetic-rotated-secret' }
       else if (/\/apps\/[^/]+$/.test(path)) {
         if (method === 'DELETE') { apps.length = 0; body = { ok: true } }
         else { Object.assign(apps[0], request.postDataJSON()); apps[0].status = apps[0].enabled ? 'active' : 'disabled'; body = apps[0] }
@@ -72,6 +77,19 @@ try {
     await page.getByRole('button', { name: 'Rotate credentials' }).click()
     await page.getByText('Save these secrets now', { exact: true }).waitFor(); assert.equal(await page.getByLabel('App token', { exact: true }).inputValue(), 'synthetic-rotated-token')
     await page.getByRole('button', { name: 'I saved the secrets' }).click()
+    await page.getByRole('button', { name: 'Create Slack webhook', exact: true }).click()
+    await page.getByText('Save this webhook URL now', { exact: true }).waitFor()
+    assert.equal(hooks.length, 1); assert.equal(hooks[0].channelId, 'general')
+    assert((await page.getByLabel('Slack webhook URL', { exact: true }).inputValue()).endsWith('synthetic-secret'))
+    await page.getByRole('button', { name: 'I saved the webhook URL', exact: true }).click()
+    await page.getByRole('button', { name: 'Rotate URL', exact: true }).click()
+    await page.getByText('Save this webhook URL now', { exact: true }).waitFor()
+    assert((await page.getByLabel('Slack webhook URL', { exact: true }).inputValue()).endsWith('rotated-secret'))
+    await page.getByRole('button', { name: 'I saved the webhook URL', exact: true }).click()
+    await page.getByRole('button', { name: 'Revoke URL', exact: true }).click()
+    await page.getByRole('button', { name: 'Confirm revoke URL', exact: true }).click()
+    await page.getByRole('button', { name: 'Create Slack webhook', exact: true }).waitFor()
+    assert.equal(hooks.length, 0)
     await page.getByRole('button', { name: 'Disable', exact: true }).click()
     await page.getByRole('button', { name: 'Enable', exact: true }).waitFor(); assert.equal(apps[0].enabled, false)
     await page.getByRole('button', { name: 'Enable', exact: true }).click()

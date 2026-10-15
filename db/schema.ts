@@ -105,3 +105,8 @@ export const appMessageRequests = sqliteTable('app_message_requests', {
   appId: text('app_id').notNull().references(() => serverApps.id), requestId: text('request_id').notNull(),
   requestHash: text('request_hash').notNull(), messageId: text('message_id').notNull(),
 }, t => [primaryKey({ columns: [t.appId, t.requestId] })])
+// Independent, channel-bound capability URLs for Slack incoming webhook senders.
+export const appSlackWebhooks = sqliteTable('app_slack_webhooks', {
+  id: text('id').primaryKey(), appId: text('app_id').notNull().references(() => serverApps.id),
+  channelId: text('channel_id').notNull().references(() => channels.id), tokenHash: text('token_hash').notNull(), createdAt: integer('created_at').notNull(),
+}, t => [uniqueIndex('app_slack_webhooks_channel').on(t.appId, t.channelId)])

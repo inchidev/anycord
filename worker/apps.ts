@@ -1,11 +1,11 @@
 import { and, eq, desc, isNull } from 'drizzle-orm'
 import { z } from 'zod'
-import { appConfigSchema, appPolicySchema, appUrlSchema, commandInvokeSchema, pingCommand, validateCommandArguments, webhookMessageSchema, type AppConfig } from '../shared/apps'
+import { slackWebhookInputSchema, slackMessageSchema, appConfigSchema, appPolicySchema, appUrlSchema, commandInvokeSchema, pingCommand, validateCommandArguments, webhookMessageSchema, type AppConfig } from '../shared/apps'
 import type { User } from '../shared/contracts'
-import { serverApps, appAudit, appInvocations, appOutbox, users } from '../db/schema'
+import { serverApps, appAudit, appInvocations, appOutbox, users, appSlackWebhooks } from '../db/schema'
 import { database, getMessages, getSetting, requireChannel, requireMembership } from './store'
 import { requireServerOwner, randomToken } from './access'
-import { decrypt, digest, encrypt, HttpError, readBody } from './security'
+import { decrypt, digest, encrypt, equalSecret, HttpError, readBody } from './security'
 import type { EndpointName } from '../shared/api'
 
 type AppRow = typeof serverApps.$inferSelect
@@ -75,7 +75,7 @@ export async function handleAppManagement(env: Env, user: User, name: EndpointNa
     }
     return json(await appPolicy(env))
   }
-  if (!['serverApps', 'appInstall', 'appUpdate', 'appRotate', 'appUninstall', 'appAudit', 'appDeliveries'].includes(name)) return
+  if (!['serverApps', 'appInstall', 'appUpdate', 'appRotate', 'appUninstall', 'appAudit', 'appDeliveries', 'slackWebhooks', 'slackWebhookCreate', 'slackWebhookRotate', 'slackWebhookRevoke'].includes(name)) return
   const workspaceId = params.workspaceId!, db = database(env)
   await requireServerOwner(env, user.id, workspaceId)
   if (name === 'serverApps') {
@@ -99,14 +99,15 @@ export async function handleAppManagement(env: Env, user: User, name: EndpointNa
     return json({ app: presentation(await findApp(env, id), await appPolicy(env)), token, signingSecret }, 201)
   }
   const app = await findApp(env, params.appId!, workspaceId)
+  if (['slackWebhooks', 'slackWebhookCreate', 'slackWebhookRotate', 'slackWebhookRevoke'].includes(name)) return manageSlackWebhook(env, user, app, name, params, request)
   if (name === 'appUninstall') {
-    await env.DB.batch([env.DB.prepare("UPDATE server_apps SET enabled = 0, token_hash = '', signing_secret = '', endpoint_url = '', commands = '[]', events = '[]', channel_ids = '[]', uninstalled_at = ? WHERE id = ?").bind(Date.now(), app.id), ...cancelPending(env, app.id)])
+    await env.DB.batch([env.DB.prepare("UPDATE server_apps SET enabled = 0, token_hash = '', signing_secret = '', endpoint_url = '', commands = '[]', events = '[]', channel_ids = '[]', uninstalled_at = ? WHERE id = ?").bind(Date.now(), app.id), env.DB.prepare('DELETE FROM app_slack_webhooks WHERE app_id = ?').bind(app.id), ...cancelPending(env, app.id)])
     await audit(env, workspaceId, app.id, user.id, 'app.uninstalled').run()
     return json({ ok: true })
   }
   if (name === 'appRotate') {
     const token = `ac_app_${randomToken(32)}`, signingSecret = randomToken(32)
-    await env.DB.batch([env.DB.prepare('UPDATE server_apps SET token_hash = ?, signing_secret = ? WHERE id = ? AND uninstalled_at IS NULL').bind(await digest(token), await encrypt(signingSecret, env.APP_SECRET), app.id), ...cancelPending(env, app.id)])
+    await env.DB.batch([env.DB.prepare('UPDATE server_apps SET token_hash = ?, signing_secret = ? WHERE id = ? AND uninstalled_at IS NULL').bind(await digest(token), await encrypt(signingSecret, env.APP_SECRET), app.id), env.DB.prepare('DELETE FROM app_slack_webhooks WHERE app_id = ?').bind(app.id), ...cancelPending(env, app.id)])
     await audit(env, workspaceId, app.id, user.id, 'credentials.rotated').run()
     return json({ app: presentation(await findApp(env, app.id), await appPolicy(env)), token, signingSecret })
   }
@@ -116,26 +117,29 @@ export async function handleAppManagement(env: Env, user: User, name: EndpointNa
   if (input.enabled) await checkConfig(env, workspaceId, input)
   await env.DB.batch([
     env.DB.prepare('UPDATE server_apps SET name = ?, avatar_url = ?, channel_ids = ?, enabled = ?, endpoint_url = ?, events = ?, commands = ? WHERE id = ? AND uninstalled_at IS NULL')
-      .bind(input.name, input.avatarUrl, JSON.stringify(input.channelIds), Number(input.enabled), input.endpointUrl ? new URL(input.endpointUrl).href : '', JSON.stringify(input.events), JSON.stringify(input.commands), app.id), ...cancelPending(env, app.id),
+      .bind(input.name, input.avatarUrl, JSON.stringify(input.channelIds), Number(input.enabled), input.endpointUrl ? new URL(input.endpointUrl).href : '', JSON.stringify(input.events), JSON.stringify(input.commands), app.id),
+    env.DB.prepare('DELETE FROM app_slack_webhooks WHERE app_id = ? AND channel_id NOT IN (SELECT value FROM json_each(?))').bind(app.id, JSON.stringify(input.channelIds)), ...cancelPending(env, app.id),
   ])
   await audit(env, workspaceId, app.id, user.id, input.enabled ? 'app.configured' : 'app.disabled').run()
   return json(presentation(await findApp(env, app.id), await appPolicy(env)))
 }
-async function post(env: Env, g: Grant, requestId: string, channelId: string, text: string, command?: { id: string; userId: string; lease?: string }) {
+async function post(env: Env, g: Grant, requestId: string, channelId: string, text: string, command?: { id: string; userId: string; lease?: string }, webhook?: { id: string; tokenHash: string }) {
   const requestHash = await digest(JSON.stringify([channelId, text])), messageId = crypto.randomUUID()
   const commandGuard = command ? ` AND EXISTS (SELECT 1 FROM app_invocations i JOIN memberships m ON m.user_id = i.user_id
     WHERE i.id = ? AND i.status = 'pending' AND m.workspace_id = ? AND i.user_id = ?)${command.lease ? " AND EXISTS (SELECT 1 FROM app_outbox WHERE id = ? AND lease = ? AND status = 'sending')" : ''}` : ''
-  const args = [...guardArgs(g, channelId), ...(command ? [command.id, g.app.workspaceId, command.userId, ...(command.lease ? [command.id, command.lease] : [])] : [])]
+  const webhookGuard = webhook ? ' AND EXISTS (SELECT 1 FROM app_slack_webhooks WHERE id = ? AND token_hash = ? AND app_id = ? AND channel_id = ?)' : ''
+  const webhookArgs = webhook ? [webhook.id, webhook.tokenHash, g.app.id, channelId] : []
+  const args = [...guardArgs(g, channelId), ...webhookArgs, ...(command ? [command.id, g.app.workspaceId, command.userId, ...(command.lease ? [command.id, command.lease] : [])] : [])]
   const result = await env.DB.batch([
     env.DB.prepare(`INSERT INTO app_message_requests (app_id, request_id, request_hash, message_id)
-      SELECT ?, ?, ?, ? WHERE ${guard}${commandGuard} ON CONFLICT(app_id, request_id) DO NOTHING`)
+      SELECT ?, ?, ?, ? WHERE ${guard}${webhookGuard}${commandGuard} ON CONFLICT(app_id, request_id) DO NOTHING`)
       .bind(g.app.id, requestId, requestHash, messageId, ...args),
     env.DB.prepare(`INSERT INTO messages (id, channel_id, author_id, text, created_at, app_id, app_request_id, app_request_hash)
       SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM app_message_requests WHERE app_id = ? AND request_id = ? AND message_id = ?)`)
       .bind(messageId, channelId, g.app.botUserId, text, Date.now(), g.app.id, requestId, requestHash, g.app.id, requestId, messageId),
   ])
   // Even a duplicate receipt cannot serve data after its grant/credential changed.
-  if (!await env.DB.prepare(`SELECT 1 AS ok WHERE ${guard}`).bind(...guardArgs(g, channelId)).first()) throw new HttpError(403, 'App access changed. Refresh its credentials and channel grants.')
+  if (!await env.DB.prepare(`SELECT 1 AS ok WHERE ${guard}${webhookGuard}`).bind(...guardArgs(g, channelId), ...webhookArgs).first()) throw new HttpError(403, 'App access changed. Refresh its credentials and channel grants.')
   const saved = await env.DB.prepare('SELECT message_id AS id, request_hash AS hash FROM app_message_requests WHERE app_id = ? AND request_id = ?').bind(g.app.id, requestId).first<{ id: string; hash: string }>()
   if (!saved) throw new HttpError(403, 'App or command access changed')
   if (saved.hash !== requestHash) throw new HttpError(409, 'This request ID was already used with different content')
@@ -150,7 +154,7 @@ async function post(env: Env, g: Grant, requestId: string, channelId: string, te
 export async function incomingAppMessage(env: Env, appId: string, request: Request) {
   const app = await findApp(env, appId)
   const token = request.headers.get('Authorization')?.match(/^Bearer (ac_app_[a-f0-9]{64})$/)?.[1]
-  if (!token || await digest(token) !== app.tokenHash) throw new HttpError(401, 'Invalid app credential')
+  if (!token || !await equalSecret(await digest(token), app.tokenHash)) throw new HttpError(401, 'Invalid app credential')
   if (!await env.HUBS.getByName(app.workspaceId).consumeRate(`app:${app.id}`, 30)) throw new HttpError(429, 'App rate limit reached. Retry in a minute.')
   const input = webhookMessageSchema.parse(await readBody(request)), g = await grant(env, app, input.channelId)
   const result = await post(env, g, input.id, input.channelId, input.text)
@@ -251,4 +255,77 @@ export async function flushAppEvents(env: Env) {
     env.DB.prepare("DELETE FROM app_outbox WHERE status NOT IN ('pending', 'sending') AND created_at < ?").bind(now - 7 * 86400_000),
     env.DB.prepare('DELETE FROM app_audit WHERE created_at < ?').bind(now - 30 * 86400_000),
   ])
+}
+
+async function manageSlackWebhook(env: Env, user: User, app: AppRow, name: EndpointName, params: Record<string, string>, request: Request) {
+  const db = database(env)
+  const metadata = { id: appSlackWebhooks.id, channelId: appSlackWebhooks.channelId, createdAt: appSlackWebhooks.createdAt }
+  if (name === 'slackWebhooks') return json(await db.select(metadata).from(appSlackWebhooks).where(eq(appSlackWebhooks.appId, app.id)).orderBy(desc(appSlackWebhooks.createdAt)).all())
+  if (name === 'slackWebhookRevoke') {
+    const removed = await db.delete(appSlackWebhooks).where(and(eq(appSlackWebhooks.id, params.webhookId!), eq(appSlackWebhooks.appId, app.id))).returning({ id: appSlackWebhooks.id }).get()
+    if (!removed) throw new HttpError(404, 'Webhook not found')
+    await audit(env, app.workspaceId, app.id, user.id, 'slack_webhook.revoked').run()
+    return json({ ok: true })
+  }
+  const token = randomToken(32), tokenHash = await digest(token), createdAt = Date.now()
+  let id: string, channelId: string
+  if (name === 'slackWebhookCreate') {
+    const input = slackWebhookInputSchema.parse(await readBody(request)), g = await grant(env, app, input.channelId)
+    id = crypto.randomUUID(); channelId = input.channelId
+    const result = await env.DB.prepare(`INSERT INTO app_slack_webhooks (id, app_id, channel_id, token_hash, created_at)
+      SELECT ?, ?, ?, ?, ? WHERE ${guard} ON CONFLICT(app_id, channel_id) DO NOTHING`).bind(id, app.id, channelId, tokenHash, createdAt, ...guardArgs(g, channelId)).run()
+    if (!result.meta.changes) throw new HttpError(409, 'This channel already has a webhook or app access changed. Refresh, then rotate or revoke the existing URL.')
+  } else {
+    const existing = await db.select().from(appSlackWebhooks).where(and(eq(appSlackWebhooks.id, params.webhookId!), eq(appSlackWebhooks.appId, app.id))).get()
+    if (!existing) throw new HttpError(404, 'Webhook not found')
+    const g = await grant(env, app, existing.channelId)
+    id = existing.id; channelId = existing.channelId
+    const result = await env.DB.prepare(`UPDATE app_slack_webhooks SET token_hash = ?, created_at = ? WHERE id = ? AND app_id = ? AND ${guard}`)
+      .bind(tokenHash, createdAt, id, app.id, ...guardArgs(g, channelId)).run()
+    if (!result.meta.changes) throw new HttpError(409, 'Webhook access changed. Refresh its channel grants.')
+  }
+  await audit(env, app.workspaceId, app.id, user.id, name === 'slackWebhookCreate' ? 'slack_webhook.created' : 'slack_webhook.rotated').run()
+  const path = `/api/compat/slack/services/${encodeURIComponent(app.workspaceId)}/${id}/${token}`
+  return json({ id, channelId, createdAt, url: new URL(path, env.AUTH_BASE_URL).href }, name === 'slackWebhookCreate' ? 201 : 200)
+}
+const slackResponse = (text: string, status = 200) => new Response(text, { status, headers: {
+  'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...(status === 405 ? { Allow: 'POST' } : {}), ...(status === 429 ? { 'Retry-After': '60' } : {}),
+} })
+export async function incomingSlackWebhook(env: Env, request: Request) {
+  try {
+    if (request.method !== 'POST') return slackResponse('method_not_allowed', 405)
+    const match = /^\/api\/compat\/slack\/services\/([^/]+)\/([a-f0-9-]{36})\/([a-f0-9]{64})$/.exec(new URL(request.url).pathname)
+    if (!match) return slackResponse('invalid_token', 404)
+    const workspaceId = decodeURIComponent(match[1]!), id = match[2]!, token = match[3]!
+    const hook = await database(env).select().from(appSlackWebhooks).where(eq(appSlackWebhooks.id, id)).get()
+    if (!hook || !await equalSecret(await digest(token), hook.tokenHash)) return slackResponse('invalid_token', 404)
+    const app = await findApp(env, hook.appId)
+    if (app.workspaceId !== workspaceId) return slackResponse('invalid_token', 404)
+    const g = await grant(env, app, hook.channelId)
+    if (!await env.HUBS.getByName(app.workspaceId).consumeRate(`app:${app.id}`, 30)) return slackResponse('rate_limited', 429)
+    const raw = await readBody(request)
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      if (['blocks', 'attachments', 'thread_ts', 'metadata'].some(key => key in raw)) return slackResponse('unsupported_payload', 400)
+      if (!('text' in raw) || typeof raw.text === 'string' && !raw.text.trim()) return slackResponse('no_text', 400)
+    }
+    const input = slackMessageSchema.safeParse(raw)
+    if (!input.success) return slackResponse('invalid_payload', 400)
+    const key = request.headers.get('Idempotency-Key')
+    if (key !== null && !/^[A-Za-z0-9._:-]{1,128}$/.test(key)) return slackResponse('invalid_payload', 400)
+    // No payload hashing for deduplication: two identical ordinary Slack posts
+    // are two distinct notifications unless the sender supplies a stable key.
+    await post(env, g, `slack:${hook.id}:${key ?? crypto.randomUUID()}`, hook.channelId, input.data.text, undefined, { id: hook.id, tokenHash: hook.tokenHash })
+    return slackResponse('ok')
+  } catch (error) {
+    if (error instanceof URIError) return slackResponse('invalid_token', 404)
+    if (error instanceof HttpError) {
+      if (error.status === 403) return slackResponse('action_prohibited', 403)
+      if (error.status === 404) return slackResponse('invalid_token', 404)
+      if (error.status === 409) return slackResponse('idempotency_conflict', 409)
+      return slackResponse('invalid_payload', error.status)
+    }
+    // Capability URLs and provider payloads never appear in logs or errors.
+    console.error(JSON.stringify({ event: 'slack_webhook_failed', kind: error instanceof Error ? error.name : 'Unknown' }))
+    return slackResponse('internal_error', 500)
+  }
 }

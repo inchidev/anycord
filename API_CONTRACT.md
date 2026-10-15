@@ -120,3 +120,5 @@ Registration and recovery forms confirm the new password client-side. The confir
 ## Server apps
 
 The shared app contract covers installation policy, server-owner app lifecycle, channel grants, independent bot credentials, incoming webhook idempotency, command registries/invocations/results and signed outbound events. See [the app API guide and examples](docs/apps.md). Both implemented engines use the same handlers and migrations.
+
+Slack-compatible incoming webhooks use channel-bound capability URLs under `/api/compat/slack/services/:workspaceId/:webhookId/:token`, accept the documented text-only JSON subset and return plain-text `ok` or a stable error. Owner-only lifecycle endpoints create/rotate/revoke URLs; optional `Idempotency-Key` uses the same durable bot receipts and guarded writes as the native API. See the [supported subset](docs/apps.md#slack-compatible-incoming-webhooks).

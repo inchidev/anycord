@@ -17,7 +17,7 @@ function edit(app?: EndpointOutput<'serverApps'>['apps'][number]) {
   Object.assign(state, app ? structuredClone(appConfigSchema.parse(app)) : empty()); formOpen.value = true
 }
 watch(() => state.kind, kind => { if (kind === 'ping') { state.endpointUrl = ''; state.events = []; state.commands = [] } })
-async function refresh() { await Promise.all([apps.refetch(), audit.refetch(), deliveries.refetch(), queryClient.invalidateQueries({ queryKey: ['commands', props.workspaceId] })]) }
+async function refresh() { await Promise.all([apps.refetch(), audit.refetch(), deliveries.refetch(), queryClient.invalidateQueries({ queryKey: ['commands', props.workspaceId] }), queryClient.invalidateQueries({ queryKey: ['slack-webhooks', props.workspaceId] })]) }
 async function perform(action: () => Promise<void>) {
   busy.value = true; error.value = ''
   try { await action(); await refresh() } catch (cause) { error.value = apiError(cause) }
@@ -44,7 +44,7 @@ function channel(id: string) { return props.channels.find(c => c.id === id)?.nam
     <UAlert v-if="apps.data.value && !apps.data.value.policy.enabled" color="warning" title="Apps are blocked by installation policy" description="The installation owner can enable them in User Settings → Installation Settings → Integrations." />
     <UAlert v-if="error" color="error" :title="error" />
     <div v-if="credentials" class="space-y-3 rounded-lg border border-default p-4">
-      <UAlert color="warning" title="Save these secrets now" description="They are only shown after install or rotation. Rotation revokes the previous token and signing key and cancels pending deliveries." />
+      <UAlert color="warning" title="Save these secrets now" description="They are only shown after install or rotation. Rotation revokes the previous token, signing key and Slack webhook URLs, and cancels pending deliveries." />
       <UFormField label="App token"><UInput :model-value="credentials.token" readonly class="w-full" autocomplete="off" /></UFormField>
       <UFormField label="Event signing secret"><UInput :model-value="credentials.signingSecret" readonly class="w-full" autocomplete="off" /></UFormField>
       <p class="break-all">POST /api/apps/{{ credentials.app.id }}/messages with Authorization: Bearer &lt;app token&gt;.</p>
@@ -87,6 +87,7 @@ function channel(id: string) { return props.channels.find(c => c.id === id)?.nam
       <p>{{ app.permissions.join(' · ') }}</p><p>Channels: {{ app.channelIds.map(id => `#${channel(id)}`).join(', ') }}</p>
       <p v-if="app.endpointUrl" class="break-all">Events: {{ app.endpointUrl }}</p>
       <div class="flex flex-wrap gap-2"><UButton color="neutral" variant="outline" :disabled="busy" @click="edit(app)">Configure</UButton><UButton color="neutral" variant="outline" :disabled="busy" @click="toggle(app)">{{ app.enabled ? 'Disable' : 'Enable' }}</UButton><UButton color="neutral" variant="outline" :disabled="busy" @click="rotate(app.id)">Rotate credentials</UButton><UButton color="error" variant="ghost" :disabled="busy" @click="confirmDelete = app.id">Uninstall</UButton></div>
+      <SlackWebhookSettings :workspace-id="workspaceId" :app-id="app.id" :channel-ids="app.channelIds" :channels="channels" :active="app.status === 'active'" />
       <div v-if="confirmDelete === app.id" class="space-y-2"><p>Uninstall {{ app.name }}? Its credentials and pending deliveries will be revoked. Its existing messages stay visible.</p><UButton color="error" :loading="busy" @click="uninstall(app.id)">Confirm uninstall</UButton><UButton color="neutral" variant="ghost" @click="confirmDelete = ''">Cancel</UButton></div>
     </article>
     <div class="flex items-center justify-between"><h3>Recent activity</h3><UButton color="neutral" variant="ghost" :loading="busy" @click="refresh">Refresh</UButton></div>
