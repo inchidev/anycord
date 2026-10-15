@@ -7,6 +7,7 @@
 - Back up directly from the installation to an independently configured private S3-compatible bucket, without an always-on operator. Persist bounded progress in SQLite Durable Objects and resume through alarms after a restart.
 - Encrypt backup records, files and recovery secrets with AES-256-GCM; authenticate the inventory and verify every uploaded payload by readback. Deliver a separate recovery key, with password-protected export. Keep verified recent and interrupted-update checkpoints in S3.
 - Update from Installation Settings through a temporary GitHub Actions executor after verifying a fresh S3 checkpoint. Keep deployment credentials in the protected deployment repository, verify exact immutable packages and prior records/files/keys, and fence interrupted deployments for explicit retry.
+- Retry production verification until the deployed Worker, database schema and public client converge, including idempotent migrations during propagation.
 - Include independent S3 download/decryption in the standalone recovery CLI. Fresh restores require reconnecting backup storage and the executor. Retain compatibility with existing manual filesystem copies.
 
 ### Upgrade

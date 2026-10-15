@@ -23,7 +23,7 @@
     "test:connections": "node scripts/test-connections.mjs",
     "test:servers": "node scripts/test-server-list.mjs",
     "test:viewport": "node scripts/test-mobile-viewport.mjs",
-    "verify": "npm run typecheck && npm run test:contract && npm run test:apps && npm run test:permissions && npm run test:telegram && npm run test:operations && npm run test:s3-backups && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && npm run build && npm run test:pwa",
+    "verify": "npm run typecheck && npm run test:contract && npm run test:apps && npm run test:permissions && npm run test:telegram && npm run test:operations && npm run test:s3-backups && npm run test:drafts && npm run test:messages && npm run test:connections && npm run test:servers && node scripts/test-navigation.mjs && npm run test:viewport && node scripts/test-deployment-verification.mjs && npm run build && npm run test:pwa",
     "prepare:cloudflare": "npm run build && node scripts/prepare-cloudflare-config.mjs",
     "release:package": "node scripts/package-release.mjs",
     "test:pwa": "node scripts/test-pwa.mjs",
