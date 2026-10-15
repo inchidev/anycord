@@ -26,7 +26,7 @@
     "test:pwa": "node scripts/test-pwa.mjs",
     "pretest:telegram": "node scripts/write-build-info.mjs",
     "test:telegram": "node scripts/test-telegram.mjs",
-    "test:telegram-launch": "node scripts/test-telegram-launch.mjs"
+    "test:telegram-launch": "node scripts/test-telegram-launch.mjs && node scripts/test-invitation-installation.mjs"
   },
   "dependencies": {
     "@cloudflare/realtimekit": "2.0.3",
