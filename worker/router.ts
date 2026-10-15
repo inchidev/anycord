@@ -44,6 +44,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     if (engine === 'celld' && response.status === 404 && !path.split('/').filter(Boolean).at(-1)?.includes('.')) return env.ASSETS.fetch(new Request(new URL('/', request.url), request))
     return response
   }
+  if (path.startsWith('/api/compat/slack/services/')) return incomingSlackWebhook(env, request)
   const endpoint = matchEndpoint(method, path)
   if (path.startsWith('/api/_operations/')) return operatorRoute(request, env, engine)
   if (endpoint?.name === 'runtime') return json({ apiVersion: API_VERSION, engine, auth: 'better-auth', realtime: 'websocket', build: buildInfo })
