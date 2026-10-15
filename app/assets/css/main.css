@@ -76,6 +76,16 @@ button, a { touch-action: manipulation; }
 .history-banner { background: #5865f2; color: #fff; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 16px; font-size: 12px; }
 .history-banner button { display: flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; min-height: 24px; }
 .message-row:target { background: #5865f21a; border-left: 2px solid #5865f2; }
+.timeline-shell { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.virtual-timeline { padding: 0 !important; overflow-anchor: none; }
+.virtual-timeline-space { position: relative; width: 100%; }
+.virtual-timeline-block { position: absolute; top: 0; left: 0; width: 100%; }
+.virtual-message-row { display: flow-root; }
+.virtual-message-row.focused-message > .message-row { background: #5865f21a; border-left: 2px solid #5865f2; }
+.go-to-latest { position: absolute; bottom: 8px; left: 16px; right: 16px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; min-height: 40px; border-radius: 6px; background: #232428; color: #dbdee1; box-shadow: 0 2px 8px #0005; font-size: 12px; text-align: left; }
+.go-to-latest:hover { background: #1e1f22; }
+.go-to-latest strong { display: flex; align-items: center; gap: 6px; color: #f2f3f5; white-space: nowrap; }
+@media (max-width: 700px) { .go-to-latest { left: 8px; right: 8px; }.go-to-latest > span { display: none; }.go-to-latest strong { margin-left: auto; } }
 .edit-error { color: #f7a0a3; font-size: 12px; margin: 6px 0; }
 @media (max-width: 700px) { .channel-sidebar:not(.mobile-open) { visibility: hidden; } }
 

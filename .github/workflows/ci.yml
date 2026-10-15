@@ -23,3 +23,4 @@ jobs:
       - run: npx playwright install --with-deps --only-shell chromium
       - run: npm run test:telegram-launch
       - run: npm run test:apps-ui
+      - run: npm run test:timeline
