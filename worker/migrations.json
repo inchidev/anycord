@@ -88,7 +88,30 @@
     ]
   },
   {
-    "name": "0008_strong_spiral",
+    "name": "0008_roles_permissions",
+    "statements": [
+      "CREATE TABLE `audit_events` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`workspace_id` text NOT NULL,\n\t`actor_id` text NOT NULL,\n\t`action` text NOT NULL,\n\t`target_id` text NOT NULL,\n\t`detail` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `audit_workspace_time` ON `audit_events` (`workspace_id`,`created_at`);",
+      "CREATE TABLE `channel_overrides` (\n\t`channel_id` text NOT NULL,\n\t`subject_type` text NOT NULL,\n\t`subject_id` text NOT NULL,\n\t`permission` text NOT NULL,\n\t`effect` text NOT NULL,\n\tPRIMARY KEY(`channel_id`, `subject_type`, `subject_id`, `permission`),\n\tFOREIGN KEY (`channel_id`) REFERENCES `channels`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `member_roles` (\n\t`workspace_id` text NOT NULL,\n\t`user_id` text NOT NULL,\n\t`role_id` text NOT NULL,\n\tPRIMARY KEY(`workspace_id`, `user_id`, `role_id`),\n\tFOREIGN KEY (`workspace_id`,`role_id`) REFERENCES `roles`(`workspace_id`,`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`user_id`,`workspace_id`) REFERENCES `memberships`(`user_id`,`workspace_id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `role_permissions` (\n\t`role_id` text NOT NULL,\n\t`permission` text NOT NULL,\n\tPRIMARY KEY(`role_id`, `permission`),\n\tFOREIGN KEY (`role_id`) REFERENCES `roles`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `roles` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`workspace_id` text NOT NULL,\n\t`name` text NOT NULL,\n\t`color` text DEFAULT '#949ba4' NOT NULL,\n\t`position` integer NOT NULL,\n\tFOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `roles_workspace_id` ON `roles` (`workspace_id`,`id`);",
+      "CREATE INDEX `roles_workspace_position` ON `roles` (`workspace_id`,`position`);",
+      "INSERT INTO roles (id, workspace_id, name, color, position) SELECT 'everyone:' || id, id, '@everyone', '#949ba4', 0 FROM workspaces;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'channels.view' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'messages.read' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'messages.send' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'reactions.add' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'threads.create' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'attachments.upload' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'voice.connect' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'voice.speak' FROM roles WHERE id = 'everyone:' || workspace_id;",
+      "INSERT INTO role_permissions (role_id, permission) SELECT id, 'ai.ask' FROM roles WHERE id = 'everyone:' || workspace_id;"
+    ]
+  },
+  {
+    "name": "0009_strong_spiral",
     "statements": [
       "CREATE TABLE `app_audit` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`workspace_id` text NOT NULL,\n\t`app_id` text,\n\t`actor_id` text NOT NULL,\n\t`action` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE no action\n);",
       "CREATE INDEX `app_audit_workspace` ON `app_audit` (`workspace_id`,`created_at`);",
@@ -108,7 +131,7 @@
     ]
   },
   {
-    "name": "0009_cute_blob",
+    "name": "0010_cute_blob",
     "statements": [
       "CREATE TABLE `app_slack_webhooks` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`app_id` text NOT NULL,\n\t`channel_id` text NOT NULL,\n\t`token_hash` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`app_id`) REFERENCES `server_apps`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`channel_id`) REFERENCES `channels`(`id`) ON UPDATE no action ON DELETE no action\n);",
       "CREATE UNIQUE INDEX `app_slack_webhooks_channel` ON `app_slack_webhooks` (`app_id`,`channel_id`);"

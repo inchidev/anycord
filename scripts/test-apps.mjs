@@ -135,6 +135,28 @@ try {
     secrets.set('/commands', changed.signingSecret)
     assert.equal((await request(`/api/channels/general/commands/${inFlight.id}`, { who: member })).status, 'cancelled')
     assert.equal(await db.prepare('SELECT count(*) AS n FROM app_message_requests WHERE app_id = ? AND request_id = ?').bind(echo.app.id, `command:${inFlight.id}`).first('n'), 0)
+    // Role and app features together: read-only members cannot use commands;
+    // revoking permissions while a provider responds prevents a late bot reply.
+    let releasePermission, permissionSeen
+    const permissionReached = new Promise(resolve => { permissionSeen = resolve })
+    gate = { seen: permissionSeen, wait: new Promise(resolve => { releasePermission = resolve }) }
+    const revokedCommand = { ...hello, id: crypto.randomUUID() }
+    const permissionFlight = request('/api/channels/general/commands', { who: member, method: 'POST', body: revokedCommand })
+    await permissionReached
+    const permissionPath = '/api/channels/general/permissions'
+    const deny = permission => ({ subjectType: 'member', subjectId: memberUser.id, permission, effect: 'deny' })
+    await request(permissionPath, { who: owner, method: 'PUT', body: { overrides: [deny('messages.send')] } })
+    releasePermission(); gate = null; await permissionFlight
+    assert.equal((await request(`/api/channels/general/commands/${revokedCommand.id}`, { who: member })).status, 'cancelled')
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM app_message_requests WHERE app_id=? AND request_id=?').bind(echo.app.id, `command:${revokedCommand.id}`).first('n'), 0)
+    await request('/api/channels/general/commands', { who: member, status: 403 })
+    await request('/api/channels/general/commands', { who: member, method: 'POST', body: { ...hello, id: crypto.randomUUID() }, status: 403 })
+    await request(permissionPath, { who: owner, method: 'PUT', body: { overrides: [deny('messages.read')] } })
+    await request(`/api/channels/general/commands/${hello.id}`, { who: member, status: 403 })
+    await request('/api/channels/general/commands', { who: member, method: 'POST', body: { ...hello, id: crypto.randomUUID() }, status: 403 })
+    await request(permissionPath, { who: owner, method: 'PUT', body: { overrides: [deny('channels.view')] } })
+    await request('/api/channels/general/commands', { who: member, status: 403 })
+    await request(permissionPath, { who: owner, method: 'PUT', body: { overrides: [] } })
     failure = 503
     const failedCommand = { ...hello, id: crypto.randomUUID() }
     await request('/api/channels/general/commands', { who: member, method: 'POST', body: failedCommand })

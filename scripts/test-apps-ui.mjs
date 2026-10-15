@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { readFile, mkdir } from 'node:fs/promises'
 import { resolve, extname } from 'node:path'
 import { chromium } from 'playwright'
+import { permissionKeys } from '../runtime/contracts.mjs'
 const root = resolve('.output/public'), build = JSON.parse(await readFile(resolve(root, 'version.json'), 'utf8'))
 const types = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.json': 'application/json', '.png': 'image/png' }
 const server = createServer(async (request, response) => {
@@ -30,7 +31,7 @@ try {
       let body = {}, status = 200
       if (path === '/api/runtime') body = { apiVersion: 1, engine: 'cloudflare', auth: 'better-auth', realtime: 'websocket', build }
       else if (path === '/api/auth/status') body = { initialized: true, user }
-      else if (path === '/api/bootstrap') body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'owner' }], channels: [{ id: 'general', workspaceId: 'main', name: 'general', kind: 'text', topic: '' }], members: [] }
+      else if (path === '/api/bootstrap') body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'owner', permissions: permissionKeys }], channels: [{ id: 'general', workspaceId: 'main', name: 'general', kind: 'text', topic: '', permissions: permissionKeys }], members: [] }
       else if (path === '/api/integrations') body = { realtimeConfigured: false, realtimeAccountId: '', realtimeAppId: '', realtimePreset: 'group_call_participant', aiConfigured: false, aiModel: 'test', email: 'later' }
       else if (path === '/api/integrations/telegram') body = { botConfigured: false, botUsername: '', clientId: '', oidcConfigured: false, notifications: false, origin: base, callbackURL: base + '/callback', miniAppURL: base, webhookURL: base + '/webhook' }
       else if (path === '/api/installation/authentication') body = { passwordLogin: true, registration: true, telegramLogin: false, miniAppLogin: false }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useMediaQuery } from '@vueuse/core'
 import type { Message } from '../../shared/contracts'
-const props = withDefaults(defineProps<{ message: Message; mine: boolean; canDelete: boolean; allowThread?: boolean; replyable?: boolean }>(), { allowThread: true, replyable: true })
+const props = withDefaults(defineProps<{ message: Message; mine: boolean; canDelete: boolean; allowThread?: boolean; replyable?: boolean; canReact?: boolean; canEdit?: boolean }>(), { allowThread: true, replyable: true, canReact: true, canEdit: true })
 const emit = defineEmits<{ edit: [text: string, done: (success: boolean) => void]; delete: [done: (success: boolean) => void]; react: [emoji: string]; reply: []; quote: []; thread: []; jump: [id: string]; copyLink: [] }>()
 const menuOpen = ref(false)
 const isMobile = useMediaQuery('(max-width: 700px)'), mobileReactions = ref(false)
@@ -23,12 +23,12 @@ const deleting = ref(false)
 const editPending = ref(false), editError = ref('')
 const reactionOpen = ref(false), deletePending = ref(false), deleteError = ref('')
 const menu = computed(() => [
-  ...(isMobile.value ? [{ label: 'Add reaction', icon: 'i-lucide-smile-plus', onSelect: () => { movedMenuFocus = true; mobileReactions.value = true } }] : []),
+  ...(isMobile.value && props.canReact ? [{ label: 'Add reaction', icon: 'i-lucide-smile-plus', onSelect: () => { movedMenuFocus = true; mobileReactions.value = true } }] : []),
   ...(props.replyable ? [{ label: 'Reply', icon: 'i-lucide-reply', onSelect: () => { movedMenuFocus = true; emit('reply') } }] : []),
   { label: 'Quote', icon: 'i-lucide-quote', onSelect: () => { movedMenuFocus = true; emit('quote') } },
   ...(props.allowThread && !props.message.threadId ? [{ label: props.message.thread ? 'Open Thread' : 'Create Thread', icon: 'i-lucide-messages-square', onSelect: () => { movedMenuFocus = true; emit('thread') } }] : []),
   { label: 'Copy Message Link', icon: 'i-lucide-link', onSelect: () => emit('copyLink') },
-  ...(props.mine ? [{ label: 'Edit Message', icon: 'i-lucide-pencil', onSelect: () => { editText.value = props.message.text; editing.value = true } }] : []),
+  ...(props.mine && props.canEdit ? [{ label: 'Edit Message', icon: 'i-lucide-pencil', onSelect: () => { editText.value = props.message.text; editing.value = true } }] : []),
   ...(props.canDelete ? [{ label: 'Delete Message', icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => { deleting.value = true } }] : []),
 ])
 function remove() {
@@ -36,7 +36,7 @@ function remove() {
   deletePending.value = true; deleteError.value = ''
   emit('delete', (success) => { deletePending.value = false; if (success) deleting.value = false; else deleteError.value = 'Could not delete the message. Try again.' })
 }
-function react(emoji: string) { emit('react', emoji); reactionOpen.value = false }
+function react(emoji: string) { if (!props.canReact) return; emit('react', emoji); reactionOpen.value = false }
 function save() {
   if (!editText.value.trim() || editPending.value) return
   editPending.value = true; editError.value = ''
@@ -62,12 +62,12 @@ function save() {
       <MessageText v-else :text="message.text"><small v-if="message.editedAt" class="edited">(edited)</small></MessageText>
       <div v-if="message.attachments.length" class="message-attachments"><MessageAttachment v-for="file in message.attachments" :key="file.id" :file="file" /></div>
       <div v-if="message.reactions.length" class="reactions">
-        <button v-for="reaction in message.reactions" :key="reaction.emoji" :class="{ mine: reaction.mine }" :aria-pressed="reaction.mine" :aria-label="`${reaction.emoji}, ${reaction.count} reactions`" @click="emit('react', reaction.emoji)">{{ reaction.emoji }} <span>{{ reaction.count }}</span></button>
+        <button v-for="reaction in message.reactions" :key="reaction.emoji" :class="{ mine: reaction.mine }" :aria-pressed="reaction.mine" :aria-label="`${reaction.emoji}, ${reaction.count} reactions`" :disabled="!canReact" @click="canReact && emit('react', reaction.emoji)">{{ reaction.emoji }} <span>{{ reaction.count }}</span></button>
       </div>
       <button v-if="message.thread && allowThread" class="thread-preview" @click="emit('thread')"><UIcon name="i-lucide-messages-square" /><strong>{{ message.thread.name }}</strong><span>{{ message.thread.messageCount }} {{ message.thread.messageCount === 1 ? 'message' : 'messages' }}</span><UIcon name="i-lucide-chevron-right" /></button>
     </div>
     <div class="message-actions">
-      <UPopover v-model:open="reactionOpen"><UButton icon="i-lucide-smile-plus" variant="ghost" color="neutral" aria-label="Add reaction" /><template #content><EmojiPicker @select="react" /></template></UPopover>
+      <UPopover v-if="canReact" v-model:open="reactionOpen"><UButton icon="i-lucide-smile-plus" variant="ghost" color="neutral" aria-label="Add reaction" /><template #content><EmojiPicker @select="react" /></template></UPopover>
       <UButton v-if="replyable" icon="i-lucide-reply" variant="ghost" color="neutral" aria-label="Reply to message" @click="emit('reply')" />
       <UDropdownMenu v-if="menu.length" v-model:open="menuOpen" :items="menu" :content="{ onCloseAutoFocus: menuFocus }"><UButton icon="i-lucide-ellipsis" variant="ghost" color="neutral" aria-label="Message actions" /></UDropdownMenu>
     </div>

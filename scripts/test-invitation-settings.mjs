@@ -1,3 +1,4 @@
+import { defaultPermissions } from '../runtime/contracts.mjs'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 
@@ -42,7 +43,7 @@ export async function invitationSettingsChecks(browser, base, build, signed, lau
         else { state.joined = true; body = { workspaceId: 'private' } }
       } else if (path === '/api/bootstrap') {
         const workspaceId = url.searchParams.get('workspace') || 'main'
-        body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member' }, ...(state.joined ? [{ id: 'private', name: 'Travel friends', initials: 'TF', role: 'member' }] : [])], channels: [{ id: 'general', workspaceId, name: 'general', kind: 'text', topic: '' }], members: [] }
+        body = { user, workspaces: [{ id: 'main', name: 'Anycord', initials: 'AN', role: 'member', permissions: defaultPermissions }, ...(state.joined ? [{ id: 'private', name: 'Travel friends', initials: 'TF', role: 'member', permissions: defaultPermissions }] : [])], channels: [{ id: 'general', workspaceId, name: 'general', kind: 'text', topic: '', permissions: defaultPermissions }], members: [] }
       } else if (path.endsWith('/messages')) body = []
       else if (path === '/api/installation/authentication') { state.ownerReads++; body = methods }
       await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })

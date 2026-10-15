@@ -5,6 +5,7 @@ import { useDebounceFn, useEventListener, useLocalStorage, useMediaQuery, useOnl
 import { AUTH_SESSION_CLOSE_CODE, channelSchema, liveEventSchema, type Channel, type Message } from '../../shared/contracts'
 import { apiFor } from '../utils/api'
 import { serverPath } from '../../shared/navigation'
+import { can } from '../../shared/permissions'
 import { livePath } from '../../shared/api'
 import { getApiTarget } from '../utils/connection'
 import { receiveMessage } from '../data/messages'
@@ -23,7 +24,8 @@ const installationHost = computed(() => new URL(installationOrigin.value).host)
 watch(() => auth.data.value, data => { if (data && !data.user) void router.replace({ path: '/login', query: { next: route.fullPath } }) }, { immediate: true })
 const workspaceId = computed(() => typeof route.params.serverId === 'string' ? route.params.serverId : 'main')
 const bootstrap = useQuery({ queryKey: computed(() => ['bootstrap', user.value?.id, workspaceId.value]), queryFn: () => api('bootstrap', { query: { workspace: workspaceId.value } }), enabled: computed(() => !!user.value) })
-const channels = computed(() => bootstrap.data.value?.channels || [])
+const accessRefreshing = ref(false)
+const channels = computed(() => accessRefreshing.value ? [] : bootstrap.data.value?.channels || [])
 const workspace = computed(() => bootstrap.data.value?.workspaces.find((item) => item.id === workspaceId.value) || serverList.data.value?.find((item) => item.id === workspaceId.value))
 const channel = computed(() => channels.value.find((item) => item.id === route.params.channelId) || channels.value.find((item) => item.kind === 'text') || channels.value[0])
 const channelId = computed(() => channel.value?.id || '')
@@ -31,7 +33,7 @@ const threadId = computed(() => typeof route.query.thread === 'string' ? route.q
 const focusedId = computed(() => route.hash.startsWith('#message-') ? route.hash.slice(9) : undefined)
 const focusMessageId = computed(() => threadId.value ? undefined : focusedId.value)
 const narrowThread = useMediaQuery('(max-width: 1300px)')
-const threadPanelActive = computed(() => (!!threadId.value || !!threadTarget.value) && channel.value?.kind === 'text' && !bootstrap.isError.value)
+const threadPanelActive = computed(() => (!!threadId.value || !!threadTarget.value) && channel.value?.kind === 'text' && !bootstrap.isError.value && can(channel.value, 'messages.read'))
 const threadModalActive = computed(() => threadPanelActive.value && narrowThread.value)
 const threadsOpen = ref(false)
 const threadTarget = ref<Message | null>(null)
@@ -40,7 +42,7 @@ const replyTo = ref<Message | null>(null)
 const composer = useTemplateRef('composer')
 const composerLayout = ref({ bottom: 24, height: 48 })
 const threadsQuery = useQuery({ queryKey: computed(() => ['threads', channelId.value]), queryFn: () => api('threads', { params: { channelId: channelId.value } }), enabled: computed(() => threadsOpen.value && !!channelId.value) })
-const { query: messagesQuery, messages } = useChannelMessages(() => ({ userId: user.value?.id, workspaceId: workspaceId.value, channelId: channelId.value, focus: focusMessageId.value, enabled: channel.value?.kind === 'text' }))
+const { query: messagesQuery, messages } = useChannelMessages(() => ({ userId: user.value?.id, workspaceId: workspaceId.value, channelId: channelId.value, focus: focusMessageId.value, enabled: channel.value?.kind === 'text' && can(channel.value, 'messages.read') }))
 const online = useOnline()
 const membersVisible = useLocalStorage('cellcord-members-visible', true)
 const textChannelsOpen = ref(true), voiceChannelsOpen = ref(true)
@@ -128,6 +130,7 @@ const wsUrl = computed(() => target.origin ? remoteSocket.value : user.value ? `
 const { status: wsStatus, send: sendLive, close: closeLive } = useWebSocket(wsUrl, {
   autoReconnect: target.origin ? false : { retries: Infinity, delay: 1500 },
   onConnected: () => {
+    void refreshAccess()
     void queryClient.invalidateQueries({ queryKey: ['messages'] })
     void queryClient.invalidateQueries({ queryKey: ['thread'] })
     void queryClient.invalidateQueries({ queryKey: ['threads'] })
@@ -140,6 +143,7 @@ const { status: wsStatus, send: sendLive, close: closeLive } = useWebSocket(wsUr
     const parsed = liveEventSchema.safeParse(raw)
     if (!parsed.success) return
     const data = parsed.data
+    if (data.type === 'permissions') void refreshAccess(data.endHuddles)
     if (data.type === 'presence') onlineIds.value = data.users
     if (data.type === 'message') {
       void receiveMessage(queryClient, { userId: user.value?.id, workspaceId: workspaceId.value }, data.message)
@@ -165,6 +169,17 @@ const { status: wsStatus, send: sendLive, close: closeLive } = useWebSocket(wsUr
     }
   },
 })
+async function refreshAccess(endHuddle = false) {
+  accessRefreshing.value = true
+  // Cancel old reads before evicting private caches and requesting fresh grants.
+  const roots = new Set(['messages', 'thread', 'threads', 'search', 'channel-permissions', 'thread-follow'])
+  const predicate = (query: { queryKey: readonly unknown[] }) => roots.has(String(query.queryKey[0]))
+  await queryClient.cancelQueries({ predicate })
+  threadTarget.value = null; replyTo.value = null; typing.value = ''; threadTyping.value = ''
+  if (endHuddle && huddle.value) { huddle.value = null; huddleOpen.value = false }
+  try { await Promise.all([queryClient.resetQueries({ predicate }), queryClient.invalidateQueries({ queryKey: ['bootstrap'] }), queryClient.invalidateQueries({ queryKey: ['permissions'] }), queryClient.invalidateQueries({ queryKey: ['audit'] })]) }
+  finally { accessRefreshing.value = false }
+}
 watch(channelId, () => { threadTarget.value = null; replyTo.value = null; typing.value = ''; threadTyping.value = ''; unread[channelId.value] = 0 })
 watch(threadId, () => { threadTyping.value = ''; if (threadId.value) sidebarOpen.value = false })
 watch(messages, async (_messages, previous) => {
@@ -218,6 +233,7 @@ async function closeThread() {
   else document.querySelector<HTMLButtonElement>('[aria-label="Browse threads"]')?.focus()
 }
 function openThread(message: Message) {
+  if (!message.thread && !can(channel.value, 'threads.create')) return
   searchOpen.value = false
   threadReturnFocus = document.getElementById(`message-${message.id}`) || (document.activeElement instanceof HTMLElement ? document.activeElement : null)
   if (message.thread) { threadTarget.value = null; return router.push({ query: { ...route.query, thread: message.thread.id }, hash: '' }) }
@@ -267,15 +283,15 @@ const serverMenu = computed(() => [
   { label: 'Join a server', icon: 'i-lucide-user-plus', onSelect: () => router.push('/join') },
   { label: 'Server Settings', icon: 'i-lucide-settings', onSelect: () => { settingsOpen.value = true } },
   ...(user.value?.role === 'owner' ? [{ label: 'Installation Settings', icon: 'i-lucide-globe', onSelect: () => showUserSettings('installation') }] : []),
-  ...(workspace.value?.role === 'owner' ? [{ label: 'Create Channel', icon: 'i-lucide-circle-plus', onSelect: () => { createOpen.value = true } }] : []),
+  ...(can(workspace.value, 'channels.manage') ? [{ label: 'Create Channel', icon: 'i-lucide-circle-plus', onSelect: () => { createOpen.value = true } }] : []),
 ])
 const channelMenu = computed(() => [
   { label: `Members (${members.value.length})`, icon: 'i-lucide-users-round', onSelect: toggleMembers },
   ...(channel.value?.kind === 'text' ? [
-    { label: 'Browse threads', icon: 'i-lucide-messages-square', onSelect: () => { threadsOpen.value = true } },
-    { label: 'Ask AI about this conversation', icon: 'i-lucide-bot', onSelect: () => ai.mutate({ channelId: channelId.value, userId: user.value!.id, workspaceId: workspaceId.value }) },
+    { label: 'Browse threads', disabled: !can(channel.value, 'messages.read'), icon: 'i-lucide-messages-square', onSelect: () => { threadsOpen.value = true } },
+    { label: 'Ask AI about this conversation', disabled: !can(channel.value, 'ai.ask') || !can(channel.value, 'messages.read') || !can(channel.value, 'messages.send'), icon: 'i-lucide-bot', onSelect: () => ai.mutate({ channelId: channelId.value, userId: user.value!.id, workspaceId: workspaceId.value }) },
   ] : []),
-  { label: 'Start a voice huddle', icon: 'i-lucide-mic', disabled: !channel.value || join.isPending.value, onSelect: startHuddle },
+  { label: 'Start a voice huddle', icon: 'i-lucide-mic', disabled: !can(channel.value, 'voice.connect') || join.isPending.value, onSelect: startHuddle },
 ])
 function browseThreads() { sidebarOpen.value = false; threadsOpen.value = true }
 function browseMembers() { sidebarOpen.value = false; toggleMembers() }
@@ -321,9 +337,9 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
           <div class="channel-heading"><UDropdownMenu :items="serverMenu"><button class="server-heading"><strong>{{ workspace?.name || 'Your server' }}</strong><UIcon :name="isMobile ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'" /></button></UDropdownMenu><UButton class="mobile-close-channels" icon="i-lucide-x" aria-label="Close server navigation" color="neutral" variant="ghost" @click="sidebarOpen = false" /></div>
           <div class="mobile-server-toolbar"><button class="mobile-server-search" @click="focusSearch"><UIcon name="i-lucide-search" />Search</button><UButton icon="i-lucide-users-round" aria-label="Server members" color="neutral" variant="soft" @click="browseMembers" /><UButton icon="i-lucide-messages-square" aria-label="Threads in this channel" color="neutral" variant="soft" :disabled="channel?.kind !== 'text'" @click="browseThreads" /></div>
           <div class="channel-scroll">
-            <div class="channel-category"><button class="category-toggle" :aria-expanded="textChannelsOpen" @click="textChannelsOpen = !textChannelsOpen">Text channels<UIcon :name="textChannelsOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" /></button><button v-if="workspace?.role === 'owner'" aria-label="Create text channel" @click="channelState.kind = 'text'; createError = ''; createOpen = true"><UIcon name="i-lucide-plus" /></button></div>
+            <div class="channel-category"><button class="category-toggle" :aria-expanded="textChannelsOpen" @click="textChannelsOpen = !textChannelsOpen">Text channels<UIcon :name="textChannelsOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" /></button><button v-if="can(workspace, 'channels.manage')" aria-label="Create text channel" @click="channelState.kind = 'text'; createError = ''; createOpen = true"><UIcon name="i-lucide-plus" /></button></div>
             <button v-for="item in channels.filter(c => c.kind === 'text')" v-show="textChannelsOpen" :key="item.id" class="channel-link" :class="{ active: channelId === item.id, unread: unread[item.id] }" :aria-current="channelId === item.id ? 'page' : undefined" @click="selectChannel(item)"><UIcon name="i-lucide-hash" /><span class="channel-name">{{ item.name }}</span><b v-if="unread[item.id]">{{ unread[item.id] }}</b><UIcon v-else-if="channelId === item.id" name="i-lucide-users-round" class="channel-tail" /></button>
-            <div class="channel-category voice-category"><button class="category-toggle" :aria-expanded="voiceChannelsOpen" @click="voiceChannelsOpen = !voiceChannelsOpen">Voice channels<UIcon :name="voiceChannelsOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" /></button><button v-if="workspace?.role === 'owner'" aria-label="Create voice channel" @click="channelState.kind = 'voice'; createError = ''; createOpen = true"><UIcon name="i-lucide-plus" /></button></div>
+            <div class="channel-category voice-category"><button class="category-toggle" :aria-expanded="voiceChannelsOpen" @click="voiceChannelsOpen = !voiceChannelsOpen">Voice channels<UIcon :name="voiceChannelsOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" /></button><button v-if="can(workspace, 'channels.manage')" aria-label="Create voice channel" @click="channelState.kind = 'voice'; createError = ''; createOpen = true"><UIcon name="i-lucide-plus" /></button></div>
             <button v-for="item in channels.filter(c => c.kind === 'voice')" v-show="voiceChannelsOpen" :key="item.id" class="channel-link" :class="{ active: channelId === item.id }" @click="selectChannel(item)"><UIcon name="i-lucide-volume-2" /><span class="channel-name">{{ item.name }}</span></button>
             <div v-if="bootstrap.isPending.value" class="channel-loading"><USkeleton v-for="i in 4" :key="i" class="h-7 w-full" /></div>
           </div>
@@ -333,7 +349,7 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
         </div>
         <div v-if="!isMobile" class="sidebar-resizer" role="separator" aria-label="Resize channel sidebar" aria-orientation="vertical" :aria-valuenow="sidebarWidth" :aria-valuemin="200" :aria-valuemax="sidebarMax" tabindex="0" :inert="threadModalActive" @pointerdown="resizeSidebar" @keydown="resizeKey" @dblclick="savedSidebarWidth = 240" />
         <main class="chat-main" :inert="threadModalActive || (isMobile && sidebarOpen)">
-          <header class="chat-header"><UButton class="mobile-menu" icon="i-lucide-arrow-left" color="neutral" variant="ghost" aria-label="Open channels" :aria-expanded="sidebarOpen" @click="sidebarOpen = true" /><UDropdownMenu v-if="isMobile" :items="channelMenu"><button class="mobile-channel-summary" aria-label="Channel details and actions"><span><UIcon :name="channel?.kind === 'voice' ? 'i-lucide-volume-2' : 'i-lucide-hash'" /><strong>{{ channel?.name || 'Your server' }}</strong><UIcon class="summary-chevron" name="i-lucide-chevron-right" /></span><small title="Online on this server"><i :class="{ connected: wsStatus === 'OPEN' }" />{{ wsStatus === 'OPEN' ? `${onlineMembers.length} Online` : 'Connecting…' }}</small></button></UDropdownMenu><UIcon :name="channel?.kind === 'voice' ? 'i-lucide-volume-2' : 'i-lucide-hash'" class="header-hash" /><h1 class="desktop-channel-title">{{ channel?.name || 'Your server' }}</h1><div class="header-divider" /><p class="channel-topic">{{ channel?.topic }}</p><div class="header-actions"><UButton class="mobile-search" icon="i-lucide-search" color="neutral" variant="ghost" aria-label="Search messages" @click="focusSearch" /><UTooltip text="Start a Huddle"><UButton class="desktop-header-action" icon="i-lucide-phone" variant="ghost" color="neutral" aria-label="Start a Huddle" :loading="join.isPending.value" :disabled="!channel" @click="startHuddle" /></UTooltip><UTooltip text="Members"><UButton class="desktop-header-action" icon="i-lucide-users-round" variant="ghost" color="neutral" aria-label="Toggle member list" :aria-pressed="narrowScreen ? memberDrawerOpen : membersVisible" @click="toggleMembers" /></UTooltip><UTooltip text="Threads"><UButton class="desktop-header-action" icon="i-lucide-messages-square" variant="ghost" color="neutral" aria-label="Browse threads" :disabled="channel?.kind !== 'text'" @click="threadsOpen = true" /></UTooltip></div></header>
+          <header class="chat-header"><UButton class="mobile-menu" icon="i-lucide-arrow-left" color="neutral" variant="ghost" aria-label="Open channels" :aria-expanded="sidebarOpen" @click="sidebarOpen = true" /><UDropdownMenu v-if="isMobile" :items="channelMenu"><button class="mobile-channel-summary" aria-label="Channel details and actions"><span><UIcon :name="channel?.kind === 'voice' ? 'i-lucide-volume-2' : 'i-lucide-hash'" /><strong>{{ channel?.name || 'Your server' }}</strong><UIcon class="summary-chevron" name="i-lucide-chevron-right" /></span><small title="Online on this server"><i :class="{ connected: wsStatus === 'OPEN' }" />{{ wsStatus === 'OPEN' ? `${onlineMembers.length} Online` : 'Connecting…' }}</small></button></UDropdownMenu><UIcon :name="channel?.kind === 'voice' ? 'i-lucide-volume-2' : 'i-lucide-hash'" class="header-hash" /><h1 class="desktop-channel-title">{{ channel?.name || 'Your server' }}</h1><div class="header-divider" /><p class="channel-topic">{{ channel?.topic }}</p><div class="header-actions"><UButton class="mobile-search" icon="i-lucide-search" color="neutral" variant="ghost" aria-label="Search messages" @click="focusSearch" /><UTooltip text="Start a Huddle"><UButton class="desktop-header-action" icon="i-lucide-phone" variant="ghost" color="neutral" aria-label="Start a Huddle" :loading="join.isPending.value" :disabled="!can(channel, 'voice.connect')" @click="startHuddle" /></UTooltip><UTooltip text="Members"><UButton class="desktop-header-action" icon="i-lucide-users-round" variant="ghost" color="neutral" aria-label="Toggle member list" :aria-pressed="narrowScreen ? memberDrawerOpen : membersVisible" @click="toggleMembers" /></UTooltip><UTooltip text="Threads"><UButton class="desktop-header-action" icon="i-lucide-messages-square" variant="ghost" color="neutral" aria-label="Browse threads" :disabled="channel?.kind !== 'text'" @click="threadsOpen = true" /></UTooltip></div></header>
           <div v-if="!online || wsStatus !== 'OPEN'" class="connection-banner" role="status">{{ !online ? 'You’re offline. Saved messages remain visible.' : 'Reconnecting to live chat…' }}</div>
           <div v-if="bootstrap.isError.value" class="content-error"><UAlert color="error" :title="apiError(bootstrap.error.value)" /><UButton @click="bootstrap.refetch()">Retry</UButton></div>
           <template v-else-if="channel?.kind === 'voice'">
@@ -341,17 +357,18 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
           </template>
           <template v-else>
             <div v-if="focusMessageId" class="history-banner"><span>Viewing older messages</span><button @click="latestMessages">Jump to latest <UIcon name="i-lucide-arrow-down" /></button></div>
-            <div ref="timeline" class="message-timeline" role="log" aria-label="Channel messages" aria-live="polite" aria-relevant="additions">
+            <p v-if="!can(channel, 'messages.read')" class="thread-notice">You do not have permission to read this channel’s history.</p>
+            <div v-else ref="timeline" class="message-timeline" role="log" aria-label="Channel messages" aria-live="polite" aria-relevant="additions">
               <div class="channel-intro"><div class="channel-intro-icon"><UIcon name="i-lucide-hash" /></div><h2>Welcome to #{{ channel?.name || 'general' }}!</h2><p>This is the beginning of the <strong>#{{ channel?.name || 'general' }}</strong> channel.</p></div>
               <div v-if="messagesQuery.isPending.value" class="message-skeletons"><div v-for="i in 3" :key="i"><USkeleton class="size-10 rounded-full" /><span><USkeleton class="h-3 w-24" /><USkeleton class="h-4 w-72 max-w-full" /></span></div></div>
               <div v-else-if="messagesQuery.isError.value" class="content-error"><p>Messages couldn’t load. Your draft is safe.</p><UButton color="neutral" variant="outline" @click="messagesQuery.refetch()">Try again</UButton></div>
-              <template v-for="(message, index) in messages" :key="message.id"><div v-if="newDay(index)" class="date-divider"><span>{{ new Date(message.createdAt).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' }) }}</span></div><MessageItem :message="message" :mine="message.authorId === user.id" :can-delete="message.authorId === user.id || workspace?.role === 'owner'" @edit="(text, done) => messageAction(message, 'PATCH', { text }).then(done)" @delete="done => messageAction(message, 'DELETE').then(done)" @react="messageAction(message, 'POST', { emoji: $event })" @reply="reply(message)" @quote="composer?.quote(message)" @thread="openThread(message)" @jump="jumpToMessage($event)" @copy-link="copyMessageLink(message)" /></template>
+              <template v-for="(message, index) in messages" :key="message.id"><div v-if="newDay(index)" class="date-divider"><span>{{ new Date(message.createdAt).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' }) }}</span></div><MessageItem :message="message" :mine="message.authorId === user.id" :can-delete="message.authorId === user.id || can(channel, 'messages.manage')" :can-edit="can(channel, 'messages.send')" :can-react="can(channel, 'reactions.add')" :replyable="can(channel, 'messages.send')" :allow-thread="!!message.thread || can(channel, 'threads.create')" @edit="(text, done) => messageAction(message, 'PATCH', { text }).then(done)" @delete="done => messageAction(message, 'DELETE').then(done)" @react="messageAction(message, 'POST', { emoji: $event })" @reply="reply(message)" @quote="composer?.quote(message)" @thread="openThread(message)" @jump="jumpToMessage($event)" @copy-link="copyMessageLink(message)" /></template>
             </div>
-            <ChatComposer ref="composer" :user-id="user.id" :workspace-id="workspaceId" :channel-id="channelId" :channel-name="channel?.name || 'general'" :reply-to="replyTo" :typing="typing" ai huddle :huddle-pending="join.isPending.value" @start-huddle="startHuddle" @clear-reply="replyTo = null" @sent="latestMessages" @typing="liveTyping" @ask-ai="ai.mutate({ channelId, userId: user.id, workspaceId })" @layout="!threadPanelActive && (composerLayout = $event)" />
+            <ChatComposer v-if="can(channel, 'messages.send') && can(channel, 'messages.read')" :can-attach="can(channel, 'attachments.upload')" ref="composer" :user-id="user.id" :workspace-id="workspaceId" :channel-id="channelId" :channel-name="channel?.name || 'general'" :reply-to="replyTo" :typing="typing" :ai="can(channel, 'ai.ask')" :huddle="can(channel, 'voice.connect')" :huddle-pending="join.isPending.value" @start-huddle="startHuddle" @clear-reply="replyTo = null" @sent="latestMessages" @typing="liveTyping" @ask-ai="ai.mutate({ channelId, userId: user.id, workspaceId })" @layout="!threadPanelActive && (composerLayout = $event)" />
           </template>
         </main>
         <ThreadDraftPanel v-if="threadPanelActive && threadTarget" :key="`${user.id}:${threadTarget.id}`" :target="threadTarget" :user-id="user.id" :modal="narrowThread" @close="closeThread" @created="threadCreated" @layout="composerLayout = $event" />
-        <ThreadPanel v-else-if="threadPanelActive && threadId" :workspace-id="workspaceId" :channel-id="channelId" :thread-id="threadId" :user="user" :owner="workspace?.role === 'owner'" :modal="narrowThread" :focus-id="focusedId" :typing="threadTyping" @close="closeThread" @jump="jumpToMessage($event, threadId)" @typing="liveTyping" @copy-link="copyMessageLink" @layout="composerLayout = $event" />
+        <ThreadPanel v-else-if="threadPanelActive && threadId" :workspace-id="workspaceId" :channel-id="channelId" :thread-id="threadId" :user="user" :owner="can(channel, 'messages.manage')" :permissions="channel?.permissions || []" :modal="narrowThread" :focus-id="focusedId" :typing="threadTyping" @close="closeThread" @jump="jumpToMessage($event, threadId)" @typing="liveTyping" @copy-link="copyMessageLink" @layout="composerLayout = $event" />
         <aside v-if="searchOpen && !threadPanelActive" class="search-panel" aria-label="Search results"><header class="thread-header"><h2>Search results</h2><UButton icon="i-lucide-x" aria-label="Close search" variant="ghost" color="neutral" @click="closeSearch" /></header><form v-if="isMobile" ref="mobileSearchInput" class="mobile-search-form" role="search" @submit.prevent="submitSearch"><UInput v-model="search" aria-label="Search this server" :placeholder="`Search ${workspace?.name || 'this server'}`" icon="i-lucide-search" class="w-full" @keydown.esc.stop="closeSearch" /></form><div class="search-results"><p v-if="!debouncedSearch.trim()">Type a message to search for, then press Enter.</p><p v-else-if="search !== debouncedSearch || searchResults.isPending.value">Searching…</p><p v-else-if="searchResults.isError.value">Could not search. <button @click="searchResults.refetch()">Retry</button></p><template v-else><p>{{ searchResults.data.value?.length || 0 }} results for “{{ debouncedSearch }}”</p><button v-for="result in searchResults.data.value" :key="result.id" @click="router.push({ path: serverPath(workspaceId, result.channelId), query: { thread: result.threadId || undefined }, hash: `#message-${result.id}` }); searchOpen = false"><small>#{{ result.channel }} · {{ result.author }}</small><span>{{ result.text }}</span><b>Jump to message</b></button></template></div></aside>
         <aside v-if="membersVisible && !threadPanelActive && !searchOpen" class="member-sidebar" aria-label="Server members"><div v-if="onlineMembers.length" class="member-section"><h2>ONLINE — {{ onlineMembers.length }}</h2><button v-for="member in onlineMembers" :key="member.id" class="member-row" @click="toast.add({ title: member.name, description: member.workspaceRole === 'owner' ? 'Server owner' : 'Server member' })"><UserAvatar class="small" :name="member.name" :color="member.color" :src="member.avatarUrl"><i /></UserAvatar><span>{{ member.name }}</span><UIcon v-if="member.workspaceRole === 'owner'" name="i-lucide-crown" class="owner-crown" /></button></div><div v-if="offlineMembers.length" class="member-section offline-members"><h2>OFFLINE — {{ offlineMembers.length }}</h2><button v-for="member in offlineMembers" :key="member.id" class="member-row" @click="toast.add({ title: member.name, description: 'Offline' })"><UserAvatar class="small" :name="member.name" :color="member.color" :src="member.avatarUrl"><i /></UserAvatar><span>{{ member.name }}</span></button></div><p v-if="!members.length" class="member-empty">Your server members will appear here.</p></aside>
       </div>

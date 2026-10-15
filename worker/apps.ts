@@ -1,9 +1,10 @@
+import { requirePermission } from './permissions'
 import { and, eq, desc, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { slackWebhookInputSchema, slackMessageSchema, appConfigSchema, appPolicySchema, appUrlSchema, commandInvokeSchema, pingCommand, validateCommandArguments, webhookMessageSchema, type AppConfig } from '../shared/apps'
 import type { User } from '../shared/contracts'
 import { serverApps, appAudit, appInvocations, appOutbox, users, appSlackWebhooks } from '../db/schema'
-import { database, getMessages, getSetting, requireChannel, requireMembership } from './store'
+import { database, getMessages, getSetting, requireChannel } from './store'
 import { requireServerOwner, randomToken } from './access'
 import { decrypt, digest, encrypt, equalSecret, HttpError, readBody } from './security'
 import type { EndpointName } from '../shared/api'
@@ -124,6 +125,7 @@ export async function handleAppManagement(env: Env, user: User, name: EndpointNa
   return json(presentation(await findApp(env, app.id), await appPolicy(env)))
 }
 async function post(env: Env, g: Grant, requestId: string, channelId: string, text: string, command?: { id: string; userId: string; lease?: string }, webhook?: { id: string; tokenHash: string }) {
+  if (command) await requireCommandAccess(env, command.userId, g.app.workspaceId, channelId)
   const requestHash = await digest(JSON.stringify([channelId, text])), messageId = crypto.randomUUID()
   const commandGuard = command ? ` AND EXISTS (SELECT 1 FROM app_invocations i JOIN memberships m ON m.user_id = i.user_id
     WHERE i.id = ? AND i.status = 'pending' AND m.workspace_id = ? AND i.user_id = ?)${command.lease ? " AND EXISTS (SELECT 1 FROM app_outbox WHERE id = ? AND lease = ? AND status = 'sending')" : ''}` : ''
@@ -161,14 +163,20 @@ export async function incomingAppMessage(env: Env, appId: string, request: Reque
   // A post-only credential must not learn human thread/reaction metadata on retries.
   return json({ ...result.message, reactions: [], thread: null }, result.inserted ? 201 : 200)
 }
+async function requireCommandAccess(env: Env, userId: string, workspaceId: string, channelId: string) {
+  const access = await requirePermission(env, userId, workspaceId, 'messages.send', channelId)
+  if (!access.channelPermissions(channelId).includes('messages.read')) throw new HttpError(403, 'Missing permission: messages.read')
+}
 export async function commandRegistry(env: Env, user: User, channelId: string) {
   const channel = await requireChannel(env, user, channelId), policy = await appPolicy(env)
   const apps = await database(env).select().from(serverApps).where(and(eq(serverApps.workspaceId, channel.workspaceId), eq(serverApps.enabled, 1), isNull(serverApps.uninstalledAt))).all()
+  await requireCommandAccess(env, user.id, channel.workspaceId, channelId)
   return apps.filter(app => channel.kind === 'text' && permitted(app, policy) && JSON.parse(app.channelIds).includes(channelId))
     .flatMap(app => (app.kind === 'ping' ? [pingCommand] : config(app).commands).map(command => ({ ...command, appId: app.id, appName: app.name })))
 }
 export async function invocationResult(env: Env, user: User, channelId: string, id: string) {
-  await requireChannel(env, user, channelId)
+  const channel = await requireChannel(env, user, channelId)
+  await requirePermission(env, user.id, channel.workspaceId, 'messages.read', channelId)
   const invocation = await database(env).select().from(appInvocations).where(and(eq(appInvocations.id, id), eq(appInvocations.channelId, channelId), eq(appInvocations.userId, user.id))).get()
   if (!invocation) throw new HttpError(404, 'Command invocation not found')
   return { id, status: invocation.status, error: invocation.error, message: invocation.messageId ? (await getMessages(env, channelId, user.id, invocation.messageId))[0] || null : null }
@@ -177,6 +185,7 @@ export async function invokeCommand(env: Env, user: User, channelId: string, req
   const input = commandInvokeSchema.parse(await readBody(request))
   await requireChannel(env, user, channelId)
   const app = await findApp(env, input.appId), g = await grant(env, app, channelId)
+  await requireCommandAccess(env, user.id, app.workspaceId, channelId)
   // Validate against the same configuration snapshot guarded by the write.
   const command = (app.kind === 'ping' ? [pingCommand] : config(app).commands).find(c => c.name === input.name)
   if (!command) throw new HttpError(404, 'Command is unavailable in this channel')
@@ -222,7 +231,7 @@ export async function flushAppEvents(env: Env) {
       const app = await findApp(env, row.app_id), g = await grant(env, app, row.channel_id)
       if (!app.endpointUrl || !appUrlSchema.safeParse(app.endpointUrl).success || (row.type === 'message.created' && !config(app).events.includes('message.created'))) throw new HttpError(403, 'Subscription was revoked')
       const event = JSON.parse(row.payload) as { data: { userId?: string } }
-      if (row.type === 'command.invoked') await requireMembership(env, event.data.userId!, app.workspaceId)
+      if (row.type === 'command.invoked') await requireCommandAccess(env, event.data.userId!, app.workspaceId, row.channel_id)
       const owned = await env.DB.prepare("SELECT 1 AS ok FROM app_outbox WHERE id = ? AND lease = ? AND status = 'sending'").bind(id, lease).first()
       if (!owned) return
       const timestamp = String(Math.floor(Date.now() / 1000)), secret = await decrypt(app.signingSecret, env.APP_SECRET)
@@ -234,7 +243,7 @@ export async function flushAppEvents(env: Env) {
         const reply = z.object({ text: z.string().trim().min(1).max(4000) }).strict().parse(await readBody(response, 20_000))
         // Claim ownership still matters after network I/O; cancelled/reclaimed deliveries cannot respond.
         if (!await env.DB.prepare("SELECT 1 AS ok FROM app_outbox WHERE id = ? AND lease = ? AND status = 'sending'").bind(id, lease).first()) return
-        await requireMembership(env, event.data.userId!, app.workspaceId)
+        await requireCommandAccess(env, event.data.userId!, app.workspaceId, row.channel_id)
         const { message } = await post(env, g, `command:${id}`, row.channel_id, reply.text, { id, userId: event.data.userId!, lease })
         await env.DB.prepare("UPDATE app_invocations SET status = 'completed', message_id = ? WHERE id = ? AND status = 'pending'").bind(message.id, id).run()
       } else await response.body?.cancel()

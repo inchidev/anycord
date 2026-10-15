@@ -148,3 +148,5 @@ Errors are plain text: `invalid_token` (`404`, including revoked URLs), `action_
 Treat the entire webhook URL as a secret. Anycord stores only the secret's hash, never lists it again, never redirects incoming posts, and omits capability URLs/payloads from application errors/logs. Configure reverse-proxy/platform access logs to redact these secret URL paths too. Audit events record `slack_webhook.created`, `.rotated` and `.revoked` without secrets. Slack bot posts do not produce outbound app events or Telegram alerts.
 
 The reference protocol is documented in [Slack's incoming webhook guide](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/); supported differences and limits are listed above.
+
+Commands require the invoking member to retain channel visibility, message history and send permissions. Permission changes cancel pending commands, including replies awaiting an external endpoint. App channel grants are explicit server-owner grants and remain independent of human roles.

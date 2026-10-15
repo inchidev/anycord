@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Message, User } from '../../shared/contracts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-const props = defineProps<{ workspaceId: string; channelId: string; threadId: string; user: User; owner: boolean; modal: boolean; focusId?: string; typing?: string }>()
+const props = defineProps<{ workspaceId: string; channelId: string; threadId: string; user: User; owner: boolean; permissions: string[]; modal: boolean; focusId?: string; typing?: string }>()
 const emit = defineEmits<{ close: []; jump: [messageId: string]; copyLink: [message: Message]; typing: [event: { type: 'typing'; channelId: string; threadId?: string }]; layout: [metrics: { bottom: number; height: number }] }>()
 const { query: thread, messages } = useThreadMessages(() => ({ userId: props.user.id, workspaceId: props.workspaceId, channelId: props.channelId, threadId: props.threadId, focus: props.focusId }))
 const replyTo = ref<Message | null>(null)
@@ -46,9 +46,9 @@ function keydown(event: KeyboardEvent) {
       <template v-else-if="thread.data.value">
         <div class="thread-origin"><p>Thread started from</p><MessageText v-if="thread.data.value.parent" :text="thread.data.value.parent.text" /><p v-else>Original message was deleted.</p></div>
         <p v-if="!messages.length" class="thread-notice">No messages yet. Start the conversation.</p>
-        <MessageItem v-for="message in messages" :key="message.id" :message="message" :mine="message.authorId === user.id" :can-delete="message.authorId === user.id || owner" :allow-thread="false" @edit="(text, done) => messageAction(message, 'PATCH', { text }).then(done)" @delete="done => messageAction(message, 'DELETE').then(done)" @react="messageAction(message, 'POST', { emoji: $event })" @reply="reply(message)" @quote="composer?.quote(message)" @jump="emit('jump', $event)" @copy-link="emit('copyLink', message)" />
+        <MessageItem v-for="message in messages" :key="message.id" :message="message" :mine="message.authorId === user.id" :can-delete="message.authorId === user.id || owner" :can-edit="permissions.includes('messages.send')" :can-react="permissions.includes('reactions.add')" :replyable="permissions.includes('messages.send')" :allow-thread="false" @edit="(text, done) => messageAction(message, 'PATCH', { text }).then(done)" @delete="done => messageAction(message, 'DELETE').then(done)" @react="messageAction(message, 'POST', { emoji: $event })" @reply="reply(message)" @quote="composer?.quote(message)" @jump="emit('jump', $event)" @copy-link="emit('copyLink', message)" />
       </template>
     </div>
-    <ChatComposer v-if="thread.data.value" ref="composer" :user-id="user.id" :workspace-id="workspaceId" :channel-id="channelId" :thread-id="threadId" :channel-name="thread.data.value.thread.name" :reply-to="replyTo" :typing="typing" @clear-reply="replyTo = null" @typing="emit('typing', $event)" @sent="emit('jump', '')" @layout="emit('layout', $event)" />
+    <ChatComposer v-if="thread.data.value && permissions.includes('messages.send')" :can-attach="permissions.includes('attachments.upload')" ref="composer" :user-id="user.id" :workspace-id="workspaceId" :channel-id="channelId" :thread-id="threadId" :channel-name="thread.data.value.thread.name" :reply-to="replyTo" :typing="typing" @clear-reply="replyTo = null" @typing="emit('typing', $event)" @sent="emit('jump', '')" @layout="emit('layout', $event)" />
   </aside>
 </template>

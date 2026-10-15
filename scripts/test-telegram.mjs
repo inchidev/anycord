@@ -204,12 +204,20 @@ try {
   await request(`/api/channels/general/threads/${thread.data.id}/follow`, { who: browser, method: 'PUT', body: { following: true } })
   await request('/api/channels/general/messages', { who: owner, method: 'POST', body: { id: crypto.randomUUID(), text: 'Followed thread activity', threadId: thread.data.id }, status: 201 })
   await request('/_test/flush'); assert.equal(deliveries.length, 2); assert(deliveries[1].text.includes('Followed thread activity')); assert(deliveries[1].text.includes(`thread=${thread.data.id}`))
+  // A private channel must not send mention/reply previews to unauthorized members.
+  await request('/api/channels/general/permissions', { who: owner, method: 'PUT', body: { overrides: [{ subjectType: 'member', subjectId: browserUser.id, permission: 'channels.view', effect: 'deny' }] } })
+  await request('/api/channels/general/messages', { who: owner, method: 'POST', body: { ...reply, id: crypto.randomUUID() }, status: 201 })
+  await request('/_test/flush'); assert.equal(deliveries.length, 2, 'Private channel access must be checked before delivering a reply notification')
+  await request('/api/channels/general/permissions', { who: owner, method: 'PUT', body: { overrides: [] } })
   // A definite Telegram rejection retries with a bound; access is checked again.
   deliveryFailure = 429
   const retryMessage = { ...reply, id: crypto.randomUUID() }
   await request('/api/channels/general/messages', { who: owner, method: 'POST', body: retryMessage, status: 201 })
   await request('/_test/flush')
   await db.prepare("UPDATE telegram_outbox SET due_at = 0 WHERE message_id = ?").bind(retryMessage.id).run()
+  await request('/api/channels/general/permissions', { who: owner, method: 'PUT', body: { overrides: [{ subjectType: 'member', subjectId: browserUser.id, permission: 'messages.read', effect: 'deny' }] } })
+  deliveryFailure = 0
+  await request('/_test/flush'); assert.equal(deliveries.length, 2, 'Permission revocation must stop already queued delivery')
   await request(`/api/workspaces/main/bans/${browserUser.id}`, { who: owner, method: 'POST' })
   deliveryFailure = 0
   await request('/_test/flush'); assert.equal(deliveries.length, 2, 'Revoked membership must stop queued delivery')

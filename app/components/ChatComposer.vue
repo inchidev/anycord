@@ -9,7 +9,7 @@ import { getApiTarget } from '../utils/connection'
 import { prepareAttempt, type MessageAttempt } from '../../shared/drafts'
 import { apiFor, uploadFor } from '../utils/api'
 import { receiveMessage } from '../data/messages'
-const props = defineProps<{ userId: string; workspaceId: string; channelId: string; channelName: string; threadId?: string; replyTo?: Message | null; typing?: string; ai?: boolean; huddle?: boolean; huddlePending?: boolean }>()
+const props = defineProps<{ userId: string; workspaceId: string; channelId: string; channelName: string; threadId?: string; replyTo?: Message | null; typing?: string; ai?: boolean; huddle?: boolean; huddlePending?: boolean; canAttach?: boolean }>()
 const emit = defineEmits<{ clearReply: []; sent: []; typing: [event: { type: 'typing'; channelId: string; threadId?: string }]; askAi: []; startHuddle: []; layout: [metrics: { bottom: number; height: number }] }>()
 const queryClient = useQueryClient(), toast = useToast()
 const commandRegistry = useQuery({ queryKey: computed(() => ['commands', props.workspaceId, props.channelId]), queryFn: () => api('commands', { params: { channelId: props.channelId } }), enabled: computed(() => !!props.channelId && !props.threadId) })
@@ -51,7 +51,7 @@ const emojiOpen = ref(false)
 const files = computed(() => drafts.value[key.value]?.attachments || [])
 const uploading = ref(false), uploadError = ref(''), pickerRevision = ref(0)
 async function addFiles(selected: File[] | File | null | undefined) {
-  if (!selected || uploading.value || isPending.value) return
+  if (props.canAttach === false || !selected || uploading.value || isPending.value) return
   if (!navigator.onLine) { uploadError.value = 'Reconnect before attaching files.'; return }
   const list = Array.isArray(selected) ? selected : [selected]
   const context = key.value, owner = props.userId, channelId = props.channelId
@@ -163,7 +163,7 @@ defineExpose({ focus, quote, measure })
       <p v-if="commandRegistry.data.value?.length" class="text-xs text-muted">Arguments follow the command in order. Use double quotes for spaces.</p>
     </div>
     <div class="composer-box">
-      <UFileUpload :key="pickerRevision" :multiple="true" :disabled="uploading || isPending || !channelId" class="attachment-picker" @update:model-value="addFiles"><template #default="{ open }"><UButton :icon="isMobile ? 'i-lucide-plus' : 'i-lucide-circle-plus'" color="neutral" variant="ghost" aria-label="Attach files" :disabled="uploading || isPending || !channelId" @click="open()" /></template></UFileUpload>
+      <UFileUpload v-if="canAttach !== false" :key="pickerRevision" :multiple="true" :disabled="uploading || isPending || !channelId" class="attachment-picker" @update:model-value="addFiles"><template #default="{ open }"><UButton :icon="isMobile ? 'i-lucide-plus' : 'i-lucide-circle-plus'" color="neutral" variant="ghost" aria-label="Attach files" :disabled="uploading || isPending || !channelId" @click="open()" /></template></UFileUpload>
       <UTextarea :disabled="!channelId" v-model="draft" :placeholder="threadId ? `Message ${channelName}` : `Message #${channelName}`" :rows="1" :maxrows="6" autoresize :maxlength="4000" variant="none" class="composer-input" aria-label="Message" @keydown="keydown" />
       <UTooltip v-if="ai" text="Ask AI (shares the last 12 channel messages)"><UButton class="composer-ai" icon="i-lucide-bot" color="neutral" variant="ghost" aria-label="Ask AI about this conversation" @click="emit('askAi')" /></UTooltip>
       <UPopover v-model:open="emojiOpen"><UButton icon="i-lucide-smile" color="neutral" variant="ghost" aria-label="Insert emoji" /><template #content><EmojiPicker @select="insertText" /></template></UPopover>

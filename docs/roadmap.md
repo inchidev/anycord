@@ -10,11 +10,11 @@
 - Installation Settings belongs to the installation owner: RealtimeKit/OpenRouter credentials, file storage and database details. Server Settings belongs to each community: identity, channels, invitations and members.
 - Voice huddles use the installation's configured RealtimeKit app and participant preset. The huddle includes microphone selection, output selection where supported by the browser, and mute/unmute. Provider tests use a local double; two-device live audio still needs actual credentials and browser permission checks.
 
-## Next: Discord-style roles and channel permissions
+## Roles and channel permissions
 
-Introduce server-owned custom roles, an everyone role, multiple roles per member, role ordering and named permission bits. Start with managing channels, inviting members, moderating messages, removing/banning members and joining/speaking in voice channels. Then add per-channel overrides with documented precedence. The server owner retains control; role management must not allow granting permissions above one's own authority. UI and every HTTP/realtime/media authorization path must use the same effective-permission evaluator.
+Custom server roles, @everyone, multiple roles per member, position-based management hierarchy and explicit string permission keys are implemented together with per-channel role/member allow/deny overrides. Server Settings includes role editing, member assignments, channel permissions and audit history. HTTP, realtime, search, private files, voice admission and notifications enforce the same permission model. Installation ownership remains separate.
 
-Existing installation ownership must stay separate from community roles. A community role must not grant access to installation secrets or unrelated servers. Do not implement disconnected UI-only roles.
+See [roles and permissions](permissions.md) for precedence, extension points, migration behavior, validation and the initial conservative huddle-revocation policy. GitHub/repository scopes and agent delegation build on this foundation later. Installation upgrades follow the explicit versioned release procedures.
 
 ## Decisions still open
 

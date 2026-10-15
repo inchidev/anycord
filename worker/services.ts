@@ -6,10 +6,10 @@ import { database, getSetting, getMessages } from './store'
 import { decrypt, HttpError } from './security'
 
 export async function integrationStatus(env: Env): Promise<Integrations> {
-  const [token, accountId, appId, preset, ai, model] = await Promise.all([
-    getSetting(env, 'realtimeToken'), getSetting(env, 'realtimeAccountId'), getSetting(env, 'realtimeAppId'), getSetting(env, 'realtimePreset'), getSetting(env, 'openrouterKey'), getSetting(env, 'aiModel'),
+  const [token, accountId, appId, preset, ai, model, listenerPreset] = await Promise.all([
+    getSetting(env, 'realtimeToken'), getSetting(env, 'realtimeAccountId'), getSetting(env, 'realtimeAppId'), getSetting(env, 'realtimePreset'), getSetting(env, 'openrouterKey'), getSetting(env, 'aiModel'), getSetting(env, 'realtimeListenerPreset'),
   ])
-  return { realtimeConfigured: !!(token && accountId && appId && preset), realtimeAccountId: accountId, realtimeAppId: appId, realtimePreset: preset || 'group_call_participant', aiConfigured: !!ai, aiModel: model || 'openai/gpt-4.1-mini', email: 'later' }
+  return { realtimeListenerPreset: listenerPreset, realtimeConfigured: !!(token && accountId && appId && preset), realtimeAccountId: accountId, realtimeAppId: appId, realtimePreset: preset || 'group_call_participant', aiConfigured: !!ai, aiModel: model || 'openai/gpt-4.1-mini', email: 'later' }
 }
 export async function realtimeRequest(env: Env, path: string, method = 'GET', body?: unknown) {
   const config = await integrationStatus(env)
@@ -23,10 +23,18 @@ export async function realtimeRequest(env: Env, path: string, method = 'GET', bo
   if (!response.ok || !result.success || !result.data.success) throw new HttpError(502, `RealtimeKit rejected the request (${response.status}). Check the credentials and preset.`)
   return result.data.data
 }
-export async function joinHuddle(env: Env, channelId: string, title: string, user: User) {
+export async function joinHuddle(env: Env, channelId: string, title: string, user: User, speak = true) {
   const db = database(env)
   const config = await integrationStatus(env)
   if (!config.realtimeConfigured) throw new HttpError(409, 'Ask the installation owner to configure Cloudflare RealtimeKit in Installation Settings → Integrations')
+  let preset = config.realtimePreset
+  if (!speak) {
+    preset = config.realtimeListenerPreset
+    if (!preset) throw new HttpError(409, 'The installation owner must configure a listener preset before listen-only huddles are available')
+    const presets = z.array(z.object({ name: z.string(), permissions: z.object({ media: z.object({ audio: z.object({ can_produce: z.string() }) }), can_change_participant_permissions: z.boolean(), can_accept_production_requests: z.boolean() }).optional() })).parse(await realtimeRequest(env, '/presets'))
+    const permissions = presets.find(item => item.name === preset)?.permissions
+    if (!permissions || permissions.media.audio.can_produce !== 'NOT_ALLOWED' || permissions.can_change_participant_permissions || permissions.can_accept_production_requests) throw new HttpError(409, 'The listener preset must deny audio production and participant permission changes')
+  }
   let meeting = await db.select().from(huddles).where(eq(huddles.channelId, channelId)).get()
   if (!meeting) {
     const created = z.object({ id: z.uuid() }).parse(await realtimeRequest(env, '/meetings', 'POST', {
@@ -36,7 +44,7 @@ export async function joinHuddle(env: Env, channelId: string, title: string, use
     await db.insert(huddles).values(meeting).run()
   }
   const participant = z.object({ id: z.uuid(), token: z.string().min(1) }).parse(await realtimeRequest(env, `/meetings/${meeting.roomName}/participants`, 'POST', {
-    name: user.name, custom_participant_id: `${user.id}:${crypto.randomUUID()}`, preset_name: config.realtimePreset,
+    name: user.name, custom_participant_id: `${user.id}:${crypto.randomUUID()}`, preset_name: preset,
   }))
   await db.insert(huddleParticipants).values({ id: participant.id, userId: user.id, channelId, meetingId: meeting.roomName }).run()
   return { authToken: participant.token, participantId: participant.id, meetingId: meeting.roomName }
