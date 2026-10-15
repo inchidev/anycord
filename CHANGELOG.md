@@ -2,10 +2,26 @@
 
 ## Unreleased
 
-- Add installation-owner backup policy/status and a trusted operator runner for whole-installation D1/auth data, committed R2/S3 files and protected recovery keys (#4).
-- Verify portable recovery points before restore into a separate empty installation; preserve accounts/communities/threads/files, revoke sessions and disable external integrations until owner review.
-- Add explicit immutable-release updates with a verified pre-update checkpoint, serialized/fenced jobs, maintenance, authenticated migrations, resource/key preservation, progress and explicit interruption recovery (#5).
-- Package the runner and operations guide for Cloudflare and celld. Existing installations bootstrap migration `0011_fancy_vanisher` with a manual published-package upgrade once; subsequent compatible releases can be selected in Settings. No deployment or automatic update occurs on merge.
+## 0.5.0 — 2026-10-15
+
+- Add custom server roles, `@everyone`, multiple role assignments, hierarchy, per-channel role/member allow/deny rules and audit history. Apply permissions to discovery, messages, search, private files, realtime, notifications, AI and voice admission (#24).
+- Add server apps with separate bot identities, explicit channel grants, hashed credentials, credential rotation, typed slash commands and signed outbound events with persisted retries and stable IDs. Installation owners enable apps and approve outbound origins; server owners manage their apps (#9, #25).
+- Accept Slack-compatible incoming webhook `{ "text": "…" }` payloads at channel-bound secret URLs and return plain-text `ok`. Include independent URL rotation/revocation and an optional durable idempotency key. Rich Slack blocks, attachments, threads, OAuth and Discord compatibility are outside this release.
+- Add whole-installation backup/restore and explicit immutable-release updates through a trusted operator runner, external recovery storage, maintenance fences, verified pre-update checkpoints and interruption recovery (#4, #5, #26).
+- Preserve roles, channel overrides, bot history, app grants, webhook hashes and message receipts in recovery copies. Re-encrypt app signing secrets for a fresh restore destination; revoke sessions, omit pending deliveries and start restored apps disabled.
+- Package the standalone operator runner and operations guide with both Cloudflare and celld artifacts.
+
+### Upgrade
+
+API v1 is retained. Apply the ordered migrations `0008_roles_permissions`, `0009_strong_spiral`, `0010_cute_blob` and `0011_fancy_vanisher`. Back up the database, private attachments and encryption/signing/operational secrets first, preserve existing resources and secrets, and use the authenticated `/api/_migrate` procedure. Migration 0008 preserves existing member chat capabilities; regenerate previously issued attachment download links. Apps start opt-in.
+
+Existing 0.4.1 installations need one manual upgrade using the published package to bootstrap the operations protocol. Afterward, connect the trusted runner and explicitly select a compatible published release in Installation Settings → Backups & updates. Protect/encrypt external backup storage: portable recovery copies contain sensitive records and keys and are not encrypted archives. Publishing does not update production or independent installations automatically.
+
+### Validation and limits
+
+The combined verification suite, mobile/desktop generated-client checks, both runtime app/permissions/recovery tests, and the disposable celld/Docker/RustFS backup/restore/runtime replacement drill passed. A local workerd upgrade from the verified published 0.4.1 Cloudflare package preserved accounts, an existing session, history and private attachment bytes. Both release archives were checked for checksums, embedded identity, ordered migrations and standalone operator imports.
+
+Role changes conservatively end active server huddles and cancel pending slash commands. Provider/device audio validation and a live Cloudflare operations-runner update between two published versions remain separate acceptance steps.
 
 ## 0.4.1 — 2026-10-15
 
