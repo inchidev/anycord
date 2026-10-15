@@ -65,8 +65,7 @@ let stopViewport: (() => void) | undefined
 onMounted(() => { stopViewport = installMobileViewport(window, document, value => { viewport.value = value }) })
 onBeforeUnmount(() => stopViewport?.())
 const liveMessageIds = new Set<string>()
-let lastFocusedMessage: string | undefined
-const timeline = useTemplateRef<HTMLElement>('timeline')
+const timeline = useTemplateRef('timeline')
 const searchInput = useTemplateRef<HTMLElement>('searchInput')
 const search = ref('')
 const { width: viewportWidth } = useWindowSize()
@@ -183,17 +182,10 @@ async function refreshAccess(endHuddle = false) {
 }
 watch(channelId, () => { threadTarget.value = null; replyTo.value = null; typing.value = ''; threadTyping.value = ''; unread[channelId.value] = 0 })
 watch(threadId, () => { threadTyping.value = ''; if (threadId.value) sidebarOpen.value = false })
-watch(messages, async (_messages, previous) => {
-  const nearBottom = !previous?.length || !timeline.value || timeline.value.scrollHeight - timeline.value.scrollTop - timeline.value.clientHeight < 200
-  await nextTick()
-  if (focusMessageId.value && lastFocusedMessage !== focusMessageId.value) {
-    const target = document.getElementById(`message-${focusMessageId.value}`)
-    if (target) { target.scrollIntoView({ block: 'center' }); lastFocusedMessage = focusMessageId.value }
-  }
-  else if (!focusMessageId.value && nearBottom) timeline.value?.scrollTo({ top: timeline.value.scrollHeight, behavior: 'instant' })
-})
-watch(focusMessageId, () => { lastFocusedMessage = undefined })
-function latestMessages() { return router.replace({ query: route.query, hash: '' }) }
+async function latestMessages() {
+  if (focusMessageId.value) await router.replace({ query: route.query, hash: '' })
+  else timeline.value?.scrollToLatest()
+}
 function toggleMembers() { if (narrowScreen.value) memberDrawerOpen.value = !memberDrawerOpen.value; else membersVisible.value = !membersVisible.value }
 watch(sidebarOpen, async (open) => {
   if (!isMobile.value) return
@@ -357,14 +349,15 @@ function newDay(index: number) { return index === 0 || new Date(messages.value[i
             <div class="voice-empty"><div class="voice-orb"><UIcon name="i-lucide-volume-2" /></div><h2>{{ channel.name }}</h2><p>There’s always room for one more.</p><UButton size="lg" :loading="join.isPending.value" @click="startHuddle">Join Huddle</UButton><button v-if="user.role === 'owner'" class="subtle-link" @click="showUserSettings('installation', 'integrations')">Configure Cloudflare RealtimeKit</button></div>
           </template>
           <template v-else>
-            <div v-if="focusMessageId" class="history-banner"><span>Viewing older messages</span><button @click="latestMessages">Jump to latest <UIcon name="i-lucide-arrow-down" /></button></div>
             <p v-if="!can(channel, 'messages.read')" class="thread-notice">You do not have permission to read this channel’s history.</p>
-            <div v-else ref="timeline" class="message-timeline" role="log" aria-label="Channel messages" aria-live="polite" aria-relevant="additions">
-              <div class="channel-intro"><div class="channel-intro-icon"><UIcon name="i-lucide-hash" /></div><h2>Welcome to #{{ channel?.name || 'general' }}!</h2><p>This is the beginning of the <strong>#{{ channel?.name || 'general' }}</strong> channel.</p></div>
-              <div v-if="messagesQuery.isPending.value" class="message-skeletons"><div v-for="i in 3" :key="i"><USkeleton class="size-10 rounded-full" /><span><USkeleton class="h-3 w-24" /><USkeleton class="h-4 w-72 max-w-full" /></span></div></div>
-              <div v-else-if="messagesQuery.isError.value" class="content-error"><p>Messages couldn’t load. Your draft is safe.</p><UButton color="neutral" variant="outline" @click="messagesQuery.refetch()">Try again</UButton></div>
-              <template v-for="(message, index) in messages" :key="message.id"><div v-if="newDay(index)" class="date-divider"><span>{{ new Date(message.createdAt).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' }) }}</span></div><MessageItem :message="message" :mine="message.authorId === user.id" :can-delete="message.authorId === user.id || can(channel, 'messages.manage')" :can-edit="can(channel, 'messages.send')" :can-react="can(channel, 'reactions.add')" :replyable="can(channel, 'messages.send')" :allow-thread="!!message.thread || can(channel, 'threads.create')" @edit="(text, done) => messageAction(message, 'PATCH', { text }).then(done)" @delete="done => messageAction(message, 'DELETE').then(done)" @react="messageAction(message, 'POST', { emoji: $event })" @reply="reply(message)" @quote="composer?.quote(message)" @thread="openThread(message)" @jump="jumpToMessage($event)" @copy-link="copyMessageLink(message)" /></template>
-            </div>
+            <MessageTimeline v-else :key="`${user.id}:${workspaceId}:${channelId}:${focusMessageId || 'latest'}`" ref="timeline" :messages="messages" :focus-id="focusMessageId" :ready="!messagesQuery.isPending.value && !messagesQuery.isError.value" label="Channel messages" @latest="latestMessages">
+              <template #intro>
+                <div class="channel-intro"><div class="channel-intro-icon"><UIcon name="i-lucide-hash" /></div><h2>Welcome to #{{ channel?.name || 'general' }}!</h2><p>This is the beginning of the <strong>#{{ channel?.name || 'general' }}</strong> channel.</p></div>
+                <div v-if="messagesQuery.isPending.value" class="message-skeletons"><div v-for="i in 3" :key="i"><USkeleton class="size-10 rounded-full" /><span><USkeleton class="h-3 w-24" /><USkeleton class="h-4 w-72 max-w-full" /></span></div></div>
+                <div v-else-if="messagesQuery.isError.value" class="content-error"><p>Messages couldn’t load. Your draft is safe.</p><UButton color="neutral" variant="outline" @click="messagesQuery.refetch()">Try again</UButton></div>
+              </template>
+              <template #default="{ message, index }"><div v-if="newDay(index)" class="date-divider"><span>{{ new Date(message.createdAt).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' }) }}</span></div><MessageItem :message="message" :mine="message.authorId === user.id" :can-delete="message.authorId === user.id || can(channel, 'messages.manage')" :can-edit="can(channel, 'messages.send')" :can-react="can(channel, 'reactions.add')" :replyable="can(channel, 'messages.send')" :allow-thread="!!message.thread || can(channel, 'threads.create')" @edit="(text, done) => messageAction(message, 'PATCH', { text }).then(done)" @delete="done => messageAction(message, 'DELETE').then(done)" @react="messageAction(message, 'POST', { emoji: $event })" @reply="reply(message)" @quote="composer?.quote(message)" @thread="openThread(message)" @jump="jumpToMessage($event)" @copy-link="copyMessageLink(message)" /></template>
+            </MessageTimeline>
             <ChatComposer v-if="can(channel, 'messages.send') && can(channel, 'messages.read')" :can-attach="can(channel, 'attachments.upload')" ref="composer" :user-id="user.id" :workspace-id="workspaceId" :channel-id="channelId" :channel-name="channel?.name || 'general'" :reply-to="replyTo" :typing="typing" :ai="can(channel, 'ai.ask')" :huddle="can(channel, 'voice.connect')" :huddle-pending="join.isPending.value" @start-huddle="startHuddle" @clear-reply="replyTo = null" @sent="latestMessages" @typing="liveTyping" @ask-ai="ai.mutate({ channelId, userId: user.id, workspaceId })" @layout="!threadPanelActive && (composerLayout = $event)" />
           </template>
         </main>
