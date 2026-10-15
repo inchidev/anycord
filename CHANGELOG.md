@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.1 — 2026-10-15
+
+- Join a community inside Telegram Mini App from the server picker or community menu: paste an invitation, review the community, installation and account, then explicitly accept with the current session (#22).
+- Preserve direct invitation and Telegram `startapp=invite_<token>` destinations through Mini App sign-in. Reject links from a different installation before sending their token, and keep pending invitations isolated by installation.
+- Unify personal and installation settings in one dialog with explicit scope, a Back action, direct owner entry, predictable close/Escape and focus/scroll handling. Keep community settings and installation-owner permissions separate.
+
+### Upgrade
+
+API v1 and schema `0007_cultured_toad_men` are unchanged. Back up the installation database, attachments and encryption/signing secrets, then promote the published artifacts while preserving the existing resources and secrets. Installed PWA clients receive the normal explicit update prompt.
+
+### Validation and limits
+
+The full verification suite and generated-client browser checks passed, including mobile/desktop settings navigation, malformed/foreign/expired/banned invitations and remote-session isolation. A disposable local Cloudflare Worker/D1 installation verifies signed Mini App login, actual Better Auth sessions, invitation use counts, private-community access, membership refresh and owner settings navigation. Telegram SDK/provider calls use local doubles. Real Telegram iOS/Android acceptance of these UX changes remains separate.
+
 ## 0.4.0 — 2026-10-15
 
 - Add installation-wide Authentication settings, Telegram OIDC and Mini App sign-in, explicit account linking and password fallback for Telegram-created accounts.
