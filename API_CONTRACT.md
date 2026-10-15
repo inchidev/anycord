@@ -52,7 +52,7 @@ Retrying message creation with the same ID must not create a second row or event
 
 Current transport: authenticated WebSocket at `/api/workspaces/:workspaceId/ws`, same public origin. `livePath()` builds its URL. An adapter must authorize before upgrade, retain a server-derived session identity, constrain typing to that server's channels, account for multiple tabs and close connections when the session is revoked. Session expiry/revocation uses close code 4001.
 
-Server events are `ready`, `message`, `refresh`, `presence`, and `typing`, validated by `liveEventSchema`. The only accepted client event is `typing` with a channel ID, validated by `liveClientEventSchema`; user/name/role are server-derived. No members, presence, conversations or unread counts are fabricated. Member removal and its connection invalidation remain future work alongside membership management.
+Server events are `ready`, `message`, `refresh`, `permissions`, `presence`, and `typing`, validated by `liveEventSchema`. The only accepted client event is `typing` with a channel ID, validated by `liveClientEventSchema`; user/name/role are server-derived. No members, presence, conversations or unread counts are fabricated. Member removal invalidates existing connections. Permission changes trigger a grant refresh and clear private client query data; channel payload delivery checks each recipient’s current view/read permissions.
 
 PocketBase native realtime and TrailBase record subscriptions are not directly interchangeable with this transport. An adapter needs a bridge for the same authorization/events. Any future transport negotiation is a contract change, not a frontend import of a native SDK.
 
@@ -128,3 +128,7 @@ Registration and recovery forms confirm the new password client-side. The confir
 The shared app contract covers installation policy, server-owner app lifecycle, channel grants, independent bot credentials, incoming webhook idempotency, command registries/invocations/results and signed outbound events. See [the app API guide and examples](docs/apps.md). Both implemented engines use the same handlers and migrations.
 
 Slack-compatible incoming webhooks use channel-bound capability URLs under `/api/compat/slack/services/:workspaceId/:webhookId/:token`, accept the documented text-only JSON subset and return plain-text `ok` or a stable error. Owner-only lifecycle endpoints create/rotate/revoke URLs; optional `Idempotency-Key` uses the same durable bot receipts and guarded writes as the native API. See the [supported subset](docs/apps.md#slack-compatible-incoming-webhooks).
+
+## Roles and channel access
+
+Server role, member-assignment, channel-override and audit endpoints use the registered permission keys in `shared/permissions.ts`. Unknown keys are rejected. The server owner retains server authority; installation ownership controls installation operations separately. Channel discovery requires `channels.view`; message history and slash-command results also require `messages.read`, and slash-command invocation requires `messages.send`. App channel grants are explicit server-owner grants independent of human roles. Permission changes cancel pending commands before an external reply can post. See [roles and permissions](docs/permissions.md) and [server apps](docs/apps.md).
