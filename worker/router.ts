@@ -1,3 +1,4 @@
+import { handleAppManagement, incomingAppMessage, commandRegistry, invokeCommand, invocationResult, flushAppEvents } from './apps'
 import { z, ZodError } from 'zod'
 import { inviteTokenSchema, inviteInputSchema, recoveryResetSchema, passwordProofSchema } from '../shared/contracts'
 import { generateRecoveryKeys, resetWithRecoveryKey, randomToken, requireServerOwner, previewInvite, acceptInvite } from './access'
@@ -175,8 +176,20 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
     }
     return createAuth(env).handler(request)
   }
+  if (endpoint?.name === 'appPost') return incomingAppMessage(env, endpoint.params.appId!, request)
   const user = await requireUser(request, env)
   if (!['GET', 'HEAD'].includes(method) && !await hub(env, '_auth').consumeRate(`writes:${user.id}`, 90)) throw new HttpError(429, 'You are sending too quickly. Try again in a minute.')
+  if (endpoint) {
+    const appResponse = await handleAppManagement(env, user, endpoint.name, endpoint.params, request)
+    if (appResponse) return appResponse
+    if (endpoint.name === 'commands') return json(await commandRegistry(env, user, endpoint.params.channelId!))
+    if (endpoint.name === 'commandInvoke') {
+      const response = await invokeCommand(env, user, endpoint.params.channelId!, request)
+      ctx.waitUntil(flushAppEvents(env))
+      return response
+    }
+    if (endpoint.name === 'commandResult') return json(await invocationResult(env, user, endpoint.params.channelId!, endpoint.params.invocationId!))
+  }
   if (endpoint?.name === 'recoveryStatus') {
     const row = await env.DB.prepare('SELECT COUNT(*) AS count, MAX(created_at) AS generatedAt FROM recovery_keys WHERE user_id = ? AND claim_id IS NULL').bind(user.id).first()
     return json(row)
@@ -424,6 +437,7 @@ async function route(request: Request, env: Env, engine: 'celld' | 'cloudflare',
       if (message.authorId !== user.id || message.threadId !== (input.threadId || null) || message.replyToId !== (input.replyToId || null) || message.text !== input.text || JSON.stringify(message.attachments.map(f => f.id).sort()) !== JSON.stringify(fileIds.slice().sort())) throw new HttpError(409, 'Message ID already exists for a different message')
       if (inserted) {
         await publish(env, channel.workspaceId, { type: 'message', message })
+        ctx.waitUntil(flushAppEvents(env))
         ctx.waitUntil(queueTelegramNotifications(env, channel.workspaceId, message).then(() => flushTelegramNotifications(env)).catch(() => { console.warn(JSON.stringify({ event: 'telegram_enqueue_failed' })) }))
       }
       return json(message, inserted ? 201 : 200)
@@ -512,6 +526,7 @@ return {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (event.cron !== '* * * * *') ctx.waitUntil(cleanupAttachments(env))
     ctx.waitUntil(flushTelegramNotifications(env))
+    ctx.waitUntil(flushAppEvents(env))
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const origin = request.headers.get('Origin')
@@ -545,7 +560,7 @@ return {
     } catch (error) {
       if (error instanceof ZodError) return json({ message: error.issues[0]?.message || 'Invalid input' }, 400, cors)
       if (error instanceof URIError) return json({ message: 'Invalid path encoding' }, 400, cors)
-      if (error instanceof HttpError) return json({ message: error.message }, error.status, cors)
+      if (error instanceof HttpError) return json({ message: error.message }, error.status, { ...cors, ...(error.status === 429 ? { 'Retry-After': '60' } : {}) })
       console.error(JSON.stringify({ event: 'request_failed', kind: error instanceof Error ? error.name : 'Unknown' }))
       return json({ message: 'Something went wrong. Try again.' }, 500, cors)
     }

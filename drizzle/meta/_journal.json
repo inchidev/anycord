@@ -57,6 +57,13 @@
       "when": 1792005372840,
       "tag": "0007_cultured_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792047494106,
+      "tag": "0008_strong_spiral",
+      "breakpoints": true
     }
   ]
 }

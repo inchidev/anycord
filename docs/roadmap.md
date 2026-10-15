@@ -27,3 +27,7 @@ Existing installation ownership must stay separate from community roles. A commu
 The initial `main` server still accepts newly registered local accounts. Other servers require membership through invitation or creation. A removed member may rejoin using another valid invitation; a banned member cannot until unbanned. Removing a ban does not automatically restore membership. A ban applies to the account on that server, not to other installations or newly created identities.
 
 Invitations are generated as `/invite#token=…` links, so the secret is not part of the page's HTTP URL. The client temporarily saves a pending token in session storage across sign-in and clears it on acceptance. Invitation tokens and recovery keys are never returned by listing/status endpoints. Copy a newly created invitation immediately; its secret cannot be retrieved later.
+
+### Server apps first milestone (#9)
+
+Server owners can install scoped incoming webhooks and the sample Ping bot, configure identities/channel grants, register validated slash commands, rotate credentials, disable or uninstall apps, and inspect audit/delivery status. Installation owners enable third-party apps and approve outbound origins. Signed message/command events use persistent retry leases and stable IDs; receiver examples demonstrate durable deduplication. See [apps](apps.md). Richer bot APIs, deferred command callbacks and Discord API compatibility are outside this milestone.
