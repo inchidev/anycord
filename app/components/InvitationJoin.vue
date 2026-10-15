@@ -10,6 +10,7 @@ const target = getApiTarget(), api = apiFor(target), client = useQueryClient()
 const origin = target.origin || window.location.origin, host = new URL(origin).host
 const storageKey = pendingInvitationKey(target.origin)
 const auth = useAuthSession()
+const telegram = useQuery({ queryKey: ['telegram-account', target.origin], queryFn: () => api('telegramAccount'), retry: false, enabled: computed(() => !!auth.data.value?.user) })
 const input = ref(''), token = ref(''), error = ref(''), busy = ref(false)
 try { token.value = props.initialToken || sessionStorage.getItem(storageKey) || '' } catch { token.value = props.initialToken || '' }
 if (token.value && !/^[a-f0-9]{48}$/.test(token.value)) { token.value = ''; error.value = 'This invitation link is incomplete.' }
@@ -18,7 +19,7 @@ remember()
 const preview = useQuery({ queryKey: computed(() => ['invite-preview', token.value]), queryFn: () => api('invitePreview', { body: { token: token.value } }), retry: false, enabled: computed(() => !!token.value) })
 function check() {
   error.value = ''
-  try { token.value = invitationToken(input.value, origin); input.value = ''; remember() }
+  try { token.value = invitationToken(input.value, origin, telegram.data.value?.miniAppLogin ? telegram.data.value.botUsername : ''); input.value = ''; remember() }
   catch (cause) { error.value = cause instanceof Error ? cause.message : 'Paste a complete invitation link or invitation code.' }
 }
 function change() { token.value = ''; input.value = ''; error.value = ''; remember() }
